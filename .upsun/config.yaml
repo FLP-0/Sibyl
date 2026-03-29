@@ -1,0 +1,15 @@
+applications:
+  sibyl:
+    type: nodejs:20
+    build:
+      flavor: none
+    hooks:
+      build: npm install && npm run build
+      deploy: ''
+    web:
+      commands:
+        start: npm start
+    mounts: {}
+
+routes:
+  'https://{default}/': { type: upstream, upstream: 'sibyl:http' }
