@@ -127,9 +127,28 @@ export default function LoginPage() {
               </label>
               <a
                 href="/forgot-password"
-                style={{ fontSize: 10, color: "var(--muted)", textDecoration: "none", letterSpacing: "0.02em", transition: "color 0.2s" }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
-                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--muted)")}
+                style={{
+                  fontSize: 9,
+                  color: "var(--accent)",
+                  textDecoration: "none",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  border: "1px solid rgba(138,127,248,0.25)",
+                  borderRadius: 3,
+                  padding: "3px 8px",
+                  transition: "all 0.2s ease",
+                  opacity: 0.7,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.opacity = "1";
+                  e.currentTarget.style.borderColor = "rgba(138,127,248,0.6)";
+                  e.currentTarget.style.background = "rgba(138,127,248,0.08)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.opacity = "0.7";
+                  e.currentTarget.style.borderColor = "rgba(138,127,248,0.25)";
+                  e.currentTarget.style.background = "transparent";
+                }}
               >
                 Oublié ?
               </a>
