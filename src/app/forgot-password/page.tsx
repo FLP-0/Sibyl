@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { SibylLogo } from "@/components/SibylLogo";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -68,17 +69,18 @@ export default function ForgotPasswordPage() {
         boxShadow: "0 32px 80px rgba(0,0,0,0.6)",
       }}>
         <div style={{
-          padding: "32px 40px 24px",
+          padding: "28px 40px 24px",
           borderBottom: "1px solid var(--border)",
           textAlign: "center",
         }}>
-          <h1 style={{
-            fontSize: 18, fontWeight: 600, letterSpacing: "0.3em",
+          <SibylLogo variant="compact" />
+          <h2 style={{
+            fontSize: 14, fontWeight: 600, letterSpacing: "0.12em",
             textTransform: "uppercase", color: "var(--foreground)",
-            fontFamily: "Georgia, serif", margin: "0 0 8px",
+            fontFamily: "Georgia, serif", margin: "18px 0 8px",
           }}>
             Mot de passe oublié
-          </h1>
+          </h2>
           <p style={{
             fontSize: 11, color: "var(--muted)", fontStyle: "italic",
             fontFamily: "Georgia, serif", margin: 0,

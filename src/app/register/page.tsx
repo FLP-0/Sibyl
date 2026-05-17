@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { SibylLogo } from "@/components/SibylLogo";
 
 const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
 const STEPS = ["Identité", "Sécurité", "Sésame"] as const;
@@ -176,36 +177,7 @@ export default function RegisterPage() {
           borderBottom: "1px solid var(--border)",
           textAlign: "center",
         }}>
-          {/* Icône oeil */}
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-            <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-              <path d="M6 24C6 24 14 12 24 12C34 12 42 24 42 24C42 24 34 36 24 36C14 36 6 24 6 24Z"
-                stroke="var(--accent)" strokeWidth="1" fill="none" opacity="0.5" />
-              <circle cx="24" cy="24" r="6" stroke="var(--accent)" strokeWidth="1" fill="none" opacity="0.8" />
-              <circle cx="24" cy="24" r="2.5" fill="var(--accent)" opacity="0.9" />
-            </svg>
-          </div>
-          <h1 style={{
-            fontSize: 22,
-            fontWeight: 600,
-            letterSpacing: "0.35em",
-            textTransform: "uppercase",
-            color: "var(--foreground)",
-            margin: "0 0 10px",
-            fontFamily: "Georgia, serif",
-          }}>
-            Sibyl
-          </h1>
-          <p style={{
-            fontSize: 11,
-            color: "var(--muted)",
-            letterSpacing: "0.06em",
-            fontStyle: "italic",
-            margin: 0,
-            fontFamily: "Georgia, serif",
-          }}>
-            La parole appartient à ceux qui savent écouter.
-          </p>
+          <SibylLogo variant="full" />
         </div>
 
         {/* Indicateur d'étapes */}

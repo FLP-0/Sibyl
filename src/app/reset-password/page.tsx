@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { SibylLogo } from "@/components/SibylLogo";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -89,17 +90,18 @@ export default function ResetPasswordPage() {
       }}>
         {/* En-tête */}
         <div style={{
-          padding: "32px 40px 24px",
+          padding: "28px 40px 24px",
           borderBottom: "1px solid var(--border)",
           textAlign: "center",
         }}>
-          <h1 style={{
-            fontSize: 18, fontWeight: 600, letterSpacing: "0.3em",
+          <SibylLogo variant="compact" />
+          <h2 style={{
+            fontSize: 14, fontWeight: 600, letterSpacing: "0.12em",
             textTransform: "uppercase", color: "var(--foreground)",
-            fontFamily: "Georgia, serif", margin: "0 0 8px",
+            fontFamily: "Georgia, serif", margin: "18px 0 8px",
           }}>
             Nouveau mot de passe
-          </h1>
+          </h2>
           <p style={{
             fontSize: 11, color: "var(--muted)", fontStyle: "italic",
             fontFamily: "Georgia, serif", margin: 0,
