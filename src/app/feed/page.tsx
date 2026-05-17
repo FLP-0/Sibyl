@@ -9,11 +9,12 @@ import ProfileTab from "./ProfileTab";
 import AdminTab from "./AdminTab";
 import HomeTab from "./HomeTab";
 import ModTab from "./ModTab";
+import StaffTab from "./StaffTab";
 import SearchOverlay from "./SearchOverlay";
 
 const DEFAULT_spaceId = "831eda8b-5972-4250-8ac4-bb536ee0d0f5";
 const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
-type Tab = "home" | "chat" | "feed" | "profile" | "admin" | "mod";
+type Tab = "home" | "chat" | "feed" | "profile" | "admin" | "mod" | "staff";
 
 export default function FeedPage() {
   return <Suspense><FeedPageInner /></Suspense>;
@@ -153,6 +154,9 @@ function FeedPageInner() {
           <SidebarTab label="Feed" active={tab === "feed"} onClick={() => { setTab("feed"); setUnread((u) => ({ ...u, feed: false })); }} icon={<FeedIcon />} hasUnread={unread.feed} />
           <SidebarTab label="Profil" active={tab === "profile"} onClick={() => setTab("profile")} icon={<ProfileIcon />} />
           <SidebarTab label="Modération" active={tab === "mod"} onClick={() => setTab("mod")} icon={<ModIcon />} accent="#c9884c" />
+          {(role === "moderator" || isAdmin) && (
+            <SidebarTab label="Staff" active={tab === "staff"} onClick={() => setTab("staff")} icon={<StaffIcon />} accent="var(--accent)" />
+          )}
           {isAdmin && (
             <SidebarTab label="Admin" active={tab === "admin"} onClick={() => setTab("admin")} icon={<AdminIcon />} accent="#c9884c" />
           )}
@@ -237,6 +241,7 @@ function FeedPageInner() {
           {tab === "feed" && <FeedTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
           {tab === "profile" && <ProfileTab userId={userId} pseudo={pseudo} spaceId={spaceId} setPseudo={(p) => setPseudo(p)} />}
           {tab === "mod" && <ModTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
+          {tab === "staff" && (role === "moderator" || isAdmin) && <StaffTab userId={userId} pseudo={pseudo} role={role} spaceId={spaceId} />}
           {tab === "admin" && isAdmin && <AdminTab userId={userId} spaceId={spaceId} currentUserRole={role} isOwner={isOwner} />}
         </div>
       </main>
@@ -357,6 +362,9 @@ function AdminIcon() {
 }
 function ModIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" /></svg>;
+}
+function StaffIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
 }
 function SearchIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>;
