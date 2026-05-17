@@ -10,6 +10,8 @@ type Space = {
   id: string; name: string; description: string | null; code: string;
   created_at: string; members: number; posts: number; messages: number;
 };
+type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string };
+type CandidatureItem = { user_id: string; pseudo: string; space_id: string; space_name: string; messages: ModMsg[] };
 
 export default function SuperAdminPage() {
   const router = useRouter();
@@ -23,6 +25,10 @@ export default function SuperAdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [candidatures, setCandidatures] = useState<CandidatureItem[]>([]);
+  const [selectedCandidature, setSelectedCandidature] = useState<string | null>(null);
+  const [replyInput, setReplyInput] = useState("");
+  const [replying, setReplying] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -36,8 +42,47 @@ export default function SuperAdminPage() {
   }, [router]);
 
   useEffect(() => {
-    if (token) fetchSpaces();
+    if (token) { fetchSpaces(); fetchCandidatures(); }
   }, [token]);
+
+  const fetchCandidatures = async () => {
+    const { data: appsData } = await supabase
+      .from("mod_applications")
+      .select("id, space_id, user_id, content, from_owner, created_at")
+      .order("created_at", { ascending: true });
+    if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
+
+    const userIds = [...new Set(appsData.map((a) => a.user_id))];
+    const spaceIds = [...new Set(appsData.map((a) => a.space_id))];
+    const [{ data: profiles }, { data: spacesData }] = await Promise.all([
+      supabase.from("profiles").select("id, pseudo").in("id", userIds),
+      supabase.from("spaces").select("id, name").in("id", spaceIds),
+    ]);
+
+    const pseudoMap: Record<string, string> = {};
+    (profiles ?? []).forEach((p) => { pseudoMap[p.id] = p.pseudo; });
+    const spaceNameMap: Record<string, string> = {};
+    (spacesData ?? []).forEach((s) => { spaceNameMap[s.id] = s.name; });
+
+    const grouped: Record<string, CandidatureItem> = {};
+    appsData.forEach((a) => {
+      const key = `${a.space_id}__${a.user_id}`;
+      if (!grouped[key]) grouped[key] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", space_id: a.space_id, space_name: spaceNameMap[a.space_id] ?? "—", messages: [] };
+      grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
+    });
+    setCandidatures(Object.values(grouped));
+  };
+
+  const handleReply = async (applicantId: string, spaceId: string) => {
+    if (!replyInput.trim() || replying) return;
+    setReplying(true);
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true,
+    });
+    setReplyInput("");
+    await fetchCandidatures();
+    setReplying(false);
+  };
 
   const fetchSpaces = async () => {
     const res = await fetch("/api/spaces", { headers: { authorization: `Bearer ${token}` } });
@@ -328,6 +373,116 @@ export default function SuperAdminPage() {
                 Aucun résultat pour « {search} ».
               </p>
             )}
+          </div>
+        </div>
+
+        {/* Candidatures */}
+        <div style={{ marginBottom: 48 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <span style={{ fontSize: 9, color: "var(--muted)", letterSpacing: "0.14em", textTransform: "uppercase" }}>
+              Candidatures modérateur — {candidatures.length}
+            </span>
+            {candidatures.some((c) => !c.messages[c.messages.length - 1]?.from_owner) && (
+              <span style={{ fontSize: 8, background: "rgba(201,136,76,0.15)", color: "#c9884c", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 7px", letterSpacing: "0.08em" }}>
+                Nouvelles
+              </span>
+            )}
+          </div>
+
+          {candidatures.length === 0 && (
+            <p style={{ textAlign: "center", color: "var(--muted)", fontSize: 12, fontStyle: "italic", fontFamily: "Georgia, serif", padding: "32px 0" }}>
+              Aucune candidature pour l'instant.
+            </p>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {candidatures.map((c) => {
+              const key = `${c.space_id}__${c.user_id}`;
+              const isOpen = selectedCandidature === key;
+              const lastMsg = c.messages[c.messages.length - 1];
+              const hasNew = lastMsg && !lastMsg.from_owner;
+              return (
+                <div key={key}>
+                  <div
+                    onClick={() => { setSelectedCandidature(isOpen ? null : key); setReplyInput(""); }}
+                    style={{
+                      background: isOpen ? "rgba(201,136,76,0.06)" : "var(--glass)",
+                      backdropFilter: "blur(20px)",
+                      border: `1px solid ${isOpen ? "rgba(201,136,76,0.35)" : "var(--glass-border)"}`,
+                      borderRadius: isOpen ? "12px 12px 0 0" : 12,
+                      padding: "16px 20px", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 14,
+                    }}
+                  >
+                    <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(201,136,76,0.1)", border: "1px solid rgba(201,136,76,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#c9884c", fontWeight: 600, flexShrink: 0 }}>
+                      {c.pseudo[0]?.toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", fontFamily: "Georgia, serif" }}>{c.pseudo}</span>
+                        <span style={{ fontSize: 9, color: "var(--muted)", background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 3, padding: "2px 7px" }}>{c.space_name}</span>
+                        {hasNew && <span style={{ fontSize: 8, background: "rgba(201,136,76,0.15)", color: "#c9884c", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 6px" }}>Nouveau</span>}
+                      </div>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {lastMsg?.content}
+                      </p>
+                    </div>
+                    <span style={{ color: "var(--muted)", fontSize: 10, flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</span>
+                  </div>
+
+                  {isOpen && (
+                    <div style={{ border: "1px solid rgba(201,136,76,0.35)", borderTop: "none", borderRadius: "0 0 12px 12px", background: "rgba(201,136,76,0.02)", backdropFilter: "blur(20px)" }}>
+                      <div style={{ padding: "16px 20px 12px", display: "flex", flexDirection: "column", gap: 10, maxHeight: 300, overflowY: "auto" }}>
+                        {c.messages.map((msg) => (
+                          <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.from_owner ? "flex-end" : "flex-start", gap: 3 }}>
+                            <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--muted)", letterSpacing: "0.06em" }}>
+                              {msg.from_owner ? "♔ Vous" : c.pseudo}
+                            </span>
+                            <div style={{
+                              maxWidth: "80%",
+                              background: msg.from_owner ? "rgba(201,136,76,0.12)" : "rgba(255,255,255,0.04)",
+                              border: `1px solid ${msg.from_owner ? "rgba(201,136,76,0.35)" : "var(--border)"}`,
+                              borderRadius: msg.from_owner ? "12px 2px 12px 12px" : "2px 12px 12px 12px",
+                              padding: "8px 14px",
+                            }}>
+                              <p style={{ margin: 0, fontSize: 12, color: "var(--foreground)", lineHeight: 1.65 }}>{msg.content}</p>
+                            </div>
+                            <span style={{ fontSize: 9, color: "var(--muted)" }}>
+                              {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ padding: "0 20px 16px", display: "flex", gap: 8 }}>
+                        <input
+                          value={replyInput}
+                          onChange={(e) => setReplyInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleReply(c.user_id, c.space_id); }}
+                          placeholder="Répondre…"
+                          style={{
+                            flex: 1, padding: "9px 14px",
+                            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,136,76,0.3)",
+                            borderRadius: 6, color: "var(--foreground)", fontSize: 12,
+                            outline: "none", fontFamily: "inherit",
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(201,136,76,0.6)")}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(201,136,76,0.3)")}
+                        />
+                        <button onClick={() => handleReply(c.user_id, c.space_id)} disabled={!replyInput.trim() || replying} style={{
+                          padding: "9px 16px", background: replyInput.trim() ? "rgba(201,136,76,0.15)" : "transparent",
+                          border: `1px solid ${replyInput.trim() ? "rgba(201,136,76,0.5)" : "var(--border)"}`,
+                          borderRadius: 6, color: replyInput.trim() ? "#c9884c" : "var(--muted)",
+                          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: replyInput.trim() ? "pointer" : "not-allowed",
+                        }}>
+                          {replying ? "…" : "Envoyer"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
