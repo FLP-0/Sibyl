@@ -9,6 +9,7 @@ const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
 type Space = {
   id: string; name: string; description: string | null; code: string;
   created_at: string; members: number; posts: number; messages: number;
+  open_access: boolean;
 };
 type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string };
 type CandidatureItem = { user_id: string; pseudo: string; space_id: string; space_name: string; messages: ModMsg[] };
@@ -105,6 +106,11 @@ export default function SuperAdminPage() {
       setError(d.error ?? "Erreur");
     }
     setLoading(false);
+  };
+
+  const handleToggleOpenAccess = async (spaceId: string, current: boolean) => {
+    await supabase.from("spaces").update({ open_access: !current }).eq("id", spaceId);
+    setSpaces((prev) => prev.map((s) => s.id === spaceId ? { ...s, open_access: !current } : s));
   };
 
   const handleDelete = async (spaceId: string) => {
@@ -317,6 +323,41 @@ export default function SuperAdminPage() {
 
                   {/* Actions */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+
+                    {/* Toggle accès libre */}
+                    <button
+                      onClick={() => handleToggleOpenAccess(space.id, space.open_access)}
+                      title={space.open_access ? "Accès libre activé" : "Accès sur invitation uniquement"}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "7px 10px",
+                        background: space.open_access ? "rgba(138,127,248,0.1)" : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${space.open_access ? "rgba(138,127,248,0.35)" : "var(--border)"}`,
+                        borderRadius: 6, cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      <span style={{ fontSize: 9, color: space.open_access ? "var(--accent)" : "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                        {space.open_access ? "Accès libre" : "Sur invitation"}
+                      </span>
+                      {/* mini toggle visuel */}
+                      <span style={{
+                        width: 28, height: 16, borderRadius: 8, flexShrink: 0,
+                        background: space.open_access ? "var(--accent)" : "var(--border)",
+                        position: "relative", display: "inline-block",
+                        transition: "background 0.2s",
+                      }}>
+                        <span style={{
+                          position: "absolute", top: 2,
+                          left: space.open_access ? 14 : 2,
+                          width: 12, height: 12, borderRadius: "50%",
+                          background: "#fff",
+                          transition: "left 0.2s",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                        }} />
+                      </span>
+                    </button>
+
                     <button
                       onClick={() => router.push("/feed?space=" + space.id)}
                       style={{
