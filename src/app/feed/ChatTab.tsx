@@ -40,6 +40,8 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
   const [allPseudos, setAllPseudos] = useState<string[]>([]);
   const [mentionFiltered, setMentionFiltered] = useState<string[]>([]);
   const [banInfo, setBanInfo] = useState<{ banned_until: string | null } | null>(null);
+  const [censorError, setCensorError] = useState<string | null>(null);
+  const censoredWordsRef = useRef<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const profileCache = useRef<Record<string, string>>({});
@@ -49,6 +51,11 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
   useEffect(() => {
     if (userId && pseudo) profileCache.current[userId] = pseudo;
   }, [userId, pseudo]);
+
+  useEffect(() => {
+    supabase.from("censored_words").select("word").eq("space_id", spaceId)
+      .then(({ data }) => { censoredWordsRef.current = (data ?? []).map((r) => r.word); });
+  }, [spaceId]);
 
   useEffect(() => {
     if (!userId || userId === "dev-user") return;
@@ -162,6 +169,13 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
 
   const handleSend = async () => {
     if (!input.trim() || userId === "dev-user" || sending) return;
+    const lower = input.toLowerCase();
+    const forbidden = censoredWordsRef.current.find((w) => lower.includes(w)) ?? null;
+    if (forbidden) {
+      setCensorError(`Le mot « ${forbidden} » est interdit dans cet espace.`);
+      setInput("");
+      return;
+    }
     setSending(true);
     const text = input.trim();
     setInput("");
@@ -281,6 +295,19 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
         borderTop: "1px solid var(--border)",
         flexShrink: 0,
       }}>
+        {censorError && (
+          <div style={{
+            background: "rgba(201,76,76,0.07)", border: "1px solid rgba(201,76,76,0.28)",
+            borderRadius: 6, padding: "8px 12px", marginBottom: 8,
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          }}>
+            <span style={{ fontSize: 11, color: "#c94c4c" }}>⊘ {censorError}</span>
+            <button onClick={() => setCensorError(null)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "rgba(201,76,76,0.5)", fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0,
+            }}>×</button>
+          </div>
+        )}
         {banInfo ? (
           <div style={{
             padding: "12px 16px", background: "rgba(201,76,76,0.07)",

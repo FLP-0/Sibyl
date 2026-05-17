@@ -46,6 +46,8 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
   const [allPseudos, setAllPseudos] = useState<string[]>([]);
   const [mentionFiltered, setMentionFiltered] = useState<string[]>([]);
   const [banInfo, setBanInfo] = useState<{ banned_until: string | null } | null>(null);
+  const [censorError, setCensorError] = useState<string | null>(null);
+  const censoredWordsRef = useRef<string[]>([]);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -59,6 +61,11 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
         });
     }
   }, [userId, spaceId]);
+
+  useEffect(() => {
+    supabase.from("censored_words").select("word").eq("space_id", spaceId)
+      .then(({ data }) => { censoredWordsRef.current = (data ?? []).map((r) => r.word); });
+  }, [spaceId]);
 
   useEffect(() => {
     fetchPosts();
@@ -111,8 +118,14 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
     })) as Post[]);
   };
 
+  const findCensoredWord = (text: string): string | null => {
+    const lower = text.toLowerCase();
+    return censoredWordsRef.current.find((w) => lower.includes(w)) ?? null;
+  };
+
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    setCensorError(null);
     setContent(val);
     const cursor = e.target.selectionStart ?? val.length;
     const before = val.slice(0, cursor);
@@ -152,6 +165,14 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
   const handlePost = async () => {
     if (!content.trim() && !imageFile) return;
     if (userId === "dev-user") return;
+    const forbidden = findCensoredWord(content);
+    if (forbidden) {
+      setCensorError(`Le mot « ${forbidden} » est interdit dans cet espace.`);
+      setContent("");
+      setImageFile(null);
+      setImagePreview(null);
+      return;
+    }
     setPosting(true);
 
     let image_url: string | null = null;
@@ -203,6 +224,21 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
             En direct
           </span>
         </div>
+
+        {/* Erreur de censure */}
+        {censorError && (
+          <div style={{
+            background: "rgba(201,76,76,0.07)", border: "1px solid rgba(201,76,76,0.28)",
+            borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+          }}>
+            <span style={{ fontSize: 12, color: "#c94c4c" }}>⊘ {censorError}</span>
+            <button onClick={() => setCensorError(null)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "rgba(201,76,76,0.5)", fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0,
+            }}>×</button>
+          </div>
+        )}
 
         {/* Composer */}
         {banInfo ? (
