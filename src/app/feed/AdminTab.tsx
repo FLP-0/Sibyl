@@ -22,6 +22,19 @@ type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations";
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
 type ContentItem = { id: string; type: "post" | "message" | "join"; content: string; pseudo: string; created_at: string; pinned?: boolean; reactions?: number; author_id?: string };
 type DayActivity = { date: string; posts: number; messages: number };
+type BanInfo = { id: string; banned_until: string | null };
+
+const BAN_DURATIONS_MOD = [
+  { label: "15 minutes", value: "900" },
+  { label: "1 heure",    value: "3600" },
+  { label: "24 heures",  value: "86400" },
+  { label: "48 heures",  value: "172800" },
+  { label: "1 semaine",  value: "604800" },
+];
+const BAN_DURATIONS_ADMIN = [
+  ...BAN_DURATIONS_MOD,
+  { label: "Définitif",  value: "permanent" },
+];
 
 const ROLES = ["member", "moderator", "admin"] as const;
 const roleLabel: Record<string, { label: string; color: string }> = {
@@ -35,9 +48,11 @@ type ConfirmAction =
   | { type: "remove"; memberId: string }
   | { type: "delete-post"; postId: string }
   | { type: "delete-message"; messageId: string }
-  | { type: "pin"; postId: string; pinned: boolean };
+  | { type: "pin"; postId: string; pinned: boolean }
+  | { type: "ban"; memberId: string; memberPseudo: string; duration: string }
+  | { type: "unban"; memberId: string; memberPseudo: string; banId: string };
 
-export default function AdminTab({ userId, spaceId }: { userId: string; spaceId: string }) {
+export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: { userId: string; spaceId: string; currentUserRole: string; isOwner?: boolean }) {
   const [section, setSection] = useState<Section>("membres");
   const [members, setMembers] = useState<Member[]>([]);
   const [stats, setStats] = useState<GlobalStats | null>(null);
@@ -61,6 +76,8 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
   const [savingSpace, setSavingSpace] = useState(false);
   const [spaceSuccess, setSpaceSuccess] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
+  const [bans, setBans] = useState<Map<string, BanInfo>>(new Map());
+  const [banDuration, setBanDuration] = useState("3600");
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -120,6 +137,15 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
     setMembers(enriched);
     setInactiveMembers(enriched.filter((m) => m.posts === 0 && m.messages === 0));
     setStats({ members: membersData.length, posts: postsCount ?? 0, messages: messagesCount ?? 0, reactions: reactionsCount ?? 0 });
+
+    const { data: bansData } = await supabase.from("bans").select("id, user_id, banned_until").eq("space_id", spaceId);
+    const bansMap = new Map<string, BanInfo>();
+    (bansData ?? []).forEach((b: { id: string; user_id: string; banned_until: string | null }) => {
+      if (!b.banned_until || new Date(b.banned_until) > new Date()) {
+        bansMap.set(b.user_id, { id: b.id, banned_until: b.banned_until });
+      }
+    });
+    setBans(bansMap);
     setLoading(false);
   };
 
@@ -278,6 +304,48 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
     setTimeout(() => setSpaceSuccess(false), 2000);
   };
 
+  const handleBan = async (memberId: string, duration: string) => {
+    setActionLoading(true);
+    const banned_until = duration === "permanent" ? null : (() => {
+      const d = new Date();
+      d.setSeconds(d.getSeconds() + parseInt(duration));
+      return d.toISOString();
+    })();
+    await supabase.from("bans").upsert(
+      { user_id: memberId, space_id: spaceId, banned_by: userId, banned_until },
+      { onConflict: "user_id,space_id" }
+    );
+    setConfirm(null);
+    await fetchAll();
+    setActionLoading(false);
+  };
+
+  const handleUnban = async (banId: string) => {
+    setActionLoading(true);
+    await supabase.from("bans").delete().eq("id", banId);
+    setConfirm(null);
+    await fetchAll();
+    setActionLoading(false);
+  };
+
+  const canBanMember = (m: Member): boolean => {
+    if (m.user_id === userId) return false;
+    if (isOwner) return true;
+    if (currentUserRole === "admin") return m.role !== "admin";
+    if (currentUserRole === "moderator") return m.role === "member";
+    return false;
+  };
+
+  const banDurationLabel = (value: string): string => {
+    if (value === "permanent") return "définitivement";
+    const found = BAN_DURATIONS_MOD.find((d) => d.value === value);
+    return found ? `pour ${found.label.toLowerCase()}` : "";
+  };
+
+  const availableDurations = (currentUserRole === "moderator" && !isOwner)
+    ? BAN_DURATIONS_MOD
+    : BAN_DURATIONS_ADMIN;
+
   const filtered = members
     .filter((m) => m.pseudo.toLowerCase().includes(search.toLowerCase()))
     .filter((m) => roleFilter === "all" || m.role === roleFilter)
@@ -422,6 +490,11 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
                           {isSelf && <span style={{ fontSize: 9, color: "var(--muted)" }}>(vous)</span>}
                           <span style={{ fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", color: ri.color, border: `1px solid ${ri.color}`, borderRadius: 3, padding: "2px 7px", opacity: 0.85 }}>{ri.label}</span>
                           {m.posts === 0 && m.messages === 0 && <span style={{ fontSize: 8, color: "#c94c4c", opacity: 0.7 }}>inactif</span>}
+                          {bans.has(m.user_id) && (
+                            <span style={{ fontSize: 8, color: "#e05555", border: "1px solid rgba(224,85,85,0.5)", borderRadius: 3, padding: "2px 6px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                              {bans.get(m.user_id)!.banned_until ? "Banni" : "Banni déf."}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
                           {m.posts} publications · {m.messages} messages · {m.likes_received} likes · depuis {new Date(m.joined_at).toLocaleDateString("fr-FR")}
@@ -466,6 +539,42 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
                               onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                               onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.8")}
                             >Retirer de l'espace</button>
+                          </div>
+                        )}
+                        {!isSelf && canBanMember(m) && (
+                          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            {bans.has(m.user_id) ? (
+                              <>
+                                <span style={{ fontSize: 11, color: "#c94c4c", flex: 1, minWidth: 0 }}>
+                                  {bans.get(m.user_id)!.banned_until
+                                    ? `Banni jusqu'au ${new Date(bans.get(m.user_id)!.banned_until!).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                                    : "Banni définitivement"}
+                                </span>
+                                <button onClick={() => setConfirm({ type: "unban", memberId: m.user_id, memberPseudo: m.pseudo, banId: bans.get(m.user_id)!.id })} style={{
+                                  padding: "7px 14px", background: "transparent", border: "1px solid rgba(76,175,110,0.5)", borderRadius: 4,
+                                  color: "#4caf6e", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+                                }}>Lever le ban</button>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ fontSize: 9, color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Bannir :</span>
+                                <select value={banDuration} onChange={(e) => setBanDuration(e.target.value)} style={{
+                                  padding: "6px 10px", background: "var(--surface)", border: "1px solid rgba(201,76,76,0.4)",
+                                  borderRadius: 4, color: "#c94c4c", fontSize: 11, outline: "none", cursor: "pointer",
+                                }}>
+                                  {availableDurations.map((d) => (
+                                    <option key={d.value} value={d.value}>{d.label}</option>
+                                  ))}
+                                </select>
+                                <button onClick={() => setConfirm({ type: "ban", memberId: m.user_id, memberPseudo: m.pseudo, duration: banDuration })} style={{
+                                  padding: "7px 14px", background: "transparent", border: "1px solid rgba(201,76,76,0.5)", borderRadius: 4,
+                                  color: "#c94c4c", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer", opacity: 0.8,
+                                }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                                  onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.8")}
+                                >Bannir</button>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -815,12 +924,17 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
               {confirm.type === "delete-post" && "Supprimer cette publication ?"}
               {confirm.type === "delete-message" && "Supprimer ce message ?"}
               {confirm.type === "pin" && ((confirm as { type: "pin"; postId: string; pinned: boolean }).pinned ? "Désépingler cette publication ?" : "Épingler cette publication ?")}
+              {confirm.type === "ban" && `Bannir ${(confirm as { type: "ban"; memberPseudo: string; duration: string }).memberPseudo} ${banDurationLabel((confirm as { type: "ban"; memberPseudo: string; duration: string }).duration)} ?`}
+              {confirm.type === "unban" && `Lever le bannissement de ${(confirm as { type: "unban"; memberPseudo: string; banId: string }).memberPseudo} ?`}
             </p>
             <p style={{ fontSize: 11, color: "var(--muted)", marginBottom: 20, fontStyle: "italic", fontFamily: "Georgia, serif" }}>
               {(confirm.type === "delete-post" || confirm.type === "delete-message") && "Cette action est irréversible."}
               {confirm.type === "remove" && "Cette action ne supprime pas le compte."}
               {confirm.type === "role" && "Le membre recevra les droits correspondants immédiatement."}
               {confirm.type === "pin" && "La publication apparaîtra en tête du feed."}
+              {confirm.type === "ban" && (confirm as { type: "ban"; duration: string }).duration === "permanent" && "Cette action est irréversible sauf intervention d'un admin."}
+              {confirm.type === "ban" && (confirm as { type: "ban"; duration: string }).duration !== "permanent" && "Le membre ne pourra plus publier ni envoyer de messages."}
+              {confirm.type === "unban" && "Le membre pourra à nouveau participer."}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button onClick={() => setConfirm(null)} style={{
@@ -833,12 +947,14 @@ export default function AdminTab({ userId, spaceId }: { userId: string; spaceId:
                 if (confirm.type === "delete-post") handleDeletePost((confirm as { type: "delete-post"; postId: string }).postId);
                 if (confirm.type === "delete-message") handleDeleteMessage((confirm as { type: "delete-message"; messageId: string }).messageId);
                 if (confirm.type === "pin") handlePin((confirm as { type: "pin"; postId: string; pinned: boolean }).postId, (confirm as { type: "pin"; postId: string; pinned: boolean }).pinned);
+                if (confirm.type === "ban") handleBan((confirm as { type: "ban"; memberId: string; duration: string }).memberId, (confirm as { type: "ban"; memberId: string; duration: string }).duration);
+                if (confirm.type === "unban") handleUnban((confirm as { type: "unban"; banId: string }).banId);
               }} style={{
                 padding: "8px 18px",
-                background: (confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove") ? "rgba(201,76,76,0.15)" : "rgba(201,136,76,0.15)",
-                border: `1px solid ${(confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove") ? "#c94c4c" : "#c9884c"}`,
+                background: confirm.type === "unban" ? "rgba(76,175,110,0.15)" : (confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove" || confirm.type === "ban") ? "rgba(201,76,76,0.15)" : "rgba(201,136,76,0.15)",
+                border: `1px solid ${confirm.type === "unban" ? "#4caf6e" : (confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove" || confirm.type === "ban") ? "#c94c4c" : "#c9884c"}`,
                 borderRadius: 4,
-                color: (confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove") ? "#c94c4c" : "#c9884c",
+                color: confirm.type === "unban" ? "#4caf6e" : (confirm.type === "delete-post" || confirm.type === "delete-message" || confirm.type === "remove" || confirm.type === "ban") ? "#c94c4c" : "#c9884c",
                 fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", cursor: actionLoading ? "not-allowed" : "pointer",
               }}>{actionLoading ? "…" : "Confirmer"}</button>
             </div>

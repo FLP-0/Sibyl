@@ -45,9 +45,20 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
   const [profilePanel, setProfilePanel] = useState<string | null>(null);
   const [allPseudos, setAllPseudos] = useState<string[]>([]);
   const [mentionFiltered, setMentionFiltered] = useState<string[]>([]);
+  const [banInfo, setBanInfo] = useState<{ banned_until: string | null } | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (userId && userId !== "dev-user") {
+      supabase.from("bans").select("banned_until").eq("user_id", userId).eq("space_id", spaceId).maybeSingle()
+        .then(({ data }) => {
+          if (!data) return;
+          if (!data.banned_until || new Date(data.banned_until) > new Date()) setBanInfo(data);
+        });
+    }
+  }, [userId, spaceId]);
 
   useEffect(() => {
     fetchPosts();
@@ -194,6 +205,18 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
         </div>
 
         {/* Composer */}
+        {banInfo ? (
+          <div style={{
+            background: "rgba(201,76,76,0.07)", border: "1px solid rgba(201,76,76,0.3)",
+            borderRadius: 12, padding: "16px 18px", marginBottom: 32, textAlign: "center",
+          }}>
+            <span style={{ fontSize: 12, color: "#c94c4c" }}>
+              {banInfo.banned_until
+                ? `Vous êtes banni jusqu'au ${new Date(banInfo.banned_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                : "Vous êtes banni définitivement de cet espace."}
+            </span>
+          </div>
+        ) : (
         <div style={{
           background: "var(--glass)",
           backdropFilter: "blur(24px) saturate(160%)",
@@ -306,6 +329,7 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
             </button>
           </div>
         </div>
+        )}
 
         {/* Posts */}
         {posts.length === 0 ? (

@@ -234,7 +234,7 @@ function FeedPageInner() {
           {tab === "chat" && <ChatTab userId={userId} pseudo={pseudo} spaceId={spaceId} isFounder={isOwner} />}
           {tab === "feed" && <FeedTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
           {tab === "profile" && <ProfileTab userId={userId} pseudo={pseudo} spaceId={spaceId} setPseudo={(p) => setPseudo(p)} />}
-          {tab === "admin" && isAdmin && <AdminTab userId={userId} spaceId={spaceId} />}
+          {tab === "admin" && isAdmin && <AdminTab userId={userId} spaceId={spaceId} currentUserRole={role} isOwner={isOwner} />}
         </div>
       </main>
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} userId={userId} spaceId={spaceId} />}

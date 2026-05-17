@@ -39,6 +39,7 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
   const [profilePanel, setProfilePanel] = useState<string | null>(null);
   const [allPseudos, setAllPseudos] = useState<string[]>([]);
   const [mentionFiltered, setMentionFiltered] = useState<string[]>([]);
+  const [banInfo, setBanInfo] = useState<{ banned_until: string | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const profileCache = useRef<Record<string, string>>({});
@@ -48,6 +49,15 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
   useEffect(() => {
     if (userId && pseudo) profileCache.current[userId] = pseudo;
   }, [userId, pseudo]);
+
+  useEffect(() => {
+    if (!userId || userId === "dev-user") return;
+    supabase.from("bans").select("banned_until").eq("user_id", userId).eq("space_id", spaceId).maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        if (!data.banned_until || new Date(data.banned_until) > new Date()) setBanInfo(data);
+      });
+  }, [userId, spaceId]);
 
   useEffect(() => {
     loadMessages();
@@ -271,6 +281,19 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
         borderTop: "1px solid var(--border)",
         flexShrink: 0,
       }}>
+        {banInfo ? (
+          <div style={{
+            padding: "12px 16px", background: "rgba(201,76,76,0.07)",
+            border: "1px solid rgba(201,76,76,0.3)", borderRadius: 6,
+            textAlign: "center",
+          }}>
+            <span style={{ fontSize: 12, color: "#c94c4c" }}>
+              {banInfo.banned_until
+                ? `Vous êtes banni jusqu'au ${new Date(banInfo.banned_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                : "Vous êtes banni définitivement de cet espace."}
+            </span>
+          </div>
+        ) : (
         <div style={{ position: "relative" }}>
           {mentionFiltered.length > 0 && (
             <div style={{
@@ -330,6 +353,7 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
           </button>
         </div>
         </div>
+        )}
       </div>
     </div>
   );
