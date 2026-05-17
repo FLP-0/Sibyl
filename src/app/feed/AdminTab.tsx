@@ -18,7 +18,9 @@ type Member = {
 type GlobalStats = { members: number; posts: number; messages: number; reactions: number };
 
 
-type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations";
+type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures";
+type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string };
+type Candidature = { user_id: string; pseudo: string; messages: ModMessage[] };
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
 type ContentItem = { id: string; type: "post" | "message" | "join"; content: string; pseudo: string; created_at: string; pinned?: boolean; reactions?: number; author_id?: string };
 type DayActivity = { date: string; posts: number; messages: number };
@@ -78,6 +80,10 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
   const [bans, setBans] = useState<Map<string, BanInfo>>(new Map());
   const [banDuration, setBanDuration] = useState("3600");
+  const [candidatures, setCandidatures] = useState<Candidature[]>([]);
+  const [selectedCandidature, setSelectedCandidature] = useState<string | null>(null);
+  const [replyInput, setReplyInput] = useState("");
+  const [replying, setReplying] = useState(false);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -244,6 +250,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     }
     if (section === "analytics") fetchAnalytics();
     if (section === "invitations") fetchInvitations();
+    if (section === "candidatures") fetchCandidatures();
     if (section !== "contenu" && realtimeRef.current) {
       supabase.removeChannel(realtimeRef.current);
       realtimeRef.current = null;
@@ -346,6 +353,36 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     ? BAN_DURATIONS_MOD
     : BAN_DURATIONS_ADMIN;
 
+  const fetchCandidatures = async () => {
+    const { data: appsData } = await supabase
+      .from("mod_applications")
+      .select("id, user_id, content, from_owner, created_at")
+      .eq("space_id", spaceId)
+      .order("created_at", { ascending: true });
+    if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
+    const userIds = [...new Set(appsData.map((a) => a.user_id))];
+    const { data: profiles } = await supabase.from("profiles").select("id, pseudo").in("id", userIds);
+    const pseudoMap: Record<string, string> = {};
+    (profiles ?? []).forEach((p) => { pseudoMap[p.id] = p.pseudo; });
+    const grouped: Record<string, Candidature> = {};
+    appsData.forEach((a) => {
+      if (!grouped[a.user_id]) grouped[a.user_id] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", messages: [] };
+      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
+    });
+    setCandidatures(Object.values(grouped));
+  };
+
+  const handleReply = async (applicantId: string) => {
+    if (!replyInput.trim() || replying) return;
+    setReplying(true);
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true,
+    });
+    setReplyInput("");
+    await fetchCandidatures();
+    setReplying(false);
+  };
+
   const filtered = members
     .filter((m) => m.pseudo.toLowerCase().includes(search.toLowerCase()))
     .filter((m) => roleFilter === "all" || m.role === roleFilter)
@@ -376,6 +413,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     { key: "analytics", label: "Analytics" },
     { key: "contenu", label: "Contenu" },
     { key: "invitations", label: "Invitations" },
+    { key: "candidatures", label: "Candidatures" },
     { key: "espace", label: "Espace" },
   ];
 
@@ -818,6 +856,104 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* ── CANDIDATURES ── */}
+        {section === "candidatures" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, height: "100%" }}>
+            {candidatures.length === 0 && (
+              <p style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic", fontFamily: "Georgia, serif", textAlign: "center", marginTop: 48 }}>
+                Aucune candidature pour l'instant.
+              </p>
+            )}
+            {candidatures.map((c) => {
+              const isOpen = selectedCandidature === c.user_id;
+              const lastMsg = c.messages[c.messages.length - 1];
+              const hasUnreplied = lastMsg && !lastMsg.from_owner;
+              return (
+                <div key={c.user_id} style={{ marginBottom: 8 }}>
+                  {/* En-tête candidat */}
+                  <div
+                    onClick={() => { setSelectedCandidature(isOpen ? null : c.user_id); setReplyInput(""); }}
+                    style={{
+                      background: isOpen ? "rgba(201,136,76,0.06)" : "var(--surface)",
+                      border: `1px solid ${isOpen ? "rgba(201,136,76,0.3)" : "var(--border)"}`,
+                      borderRadius: isOpen ? "6px 6px 0 0" : 6,
+                      padding: "12px 16px", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 12,
+                    }}
+                  >
+                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(201,136,76,0.1)", border: "1px solid rgba(201,136,76,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#c9884c", fontWeight: 600, flexShrink: 0 }}>
+                      {c.pseudo[0]?.toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{c.pseudo}</span>
+                        {hasUnreplied && <span style={{ fontSize: 8, background: "rgba(201,136,76,0.15)", color: "#c9884c", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 6px", letterSpacing: "0.08em" }}>Nouveau</span>}
+                      </div>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+                        {lastMsg?.content}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 10, color: "var(--muted)", flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</span>
+                  </div>
+
+                  {/* Thread */}
+                  {isOpen && (
+                    <div style={{ border: "1px solid rgba(201,136,76,0.3)", borderTop: "none", borderRadius: "0 0 6px 6px", background: "rgba(201,136,76,0.02)" }}>
+                      <div style={{ padding: "16px 16px 12px", display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto" }}>
+                        {c.messages.map((msg) => (
+                          <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.from_owner ? "flex-end" : "flex-start", gap: 3 }}>
+                            <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--muted)", letterSpacing: "0.06em" }}>
+                              {msg.from_owner ? "♔ Vous" : c.pseudo}
+                            </span>
+                            <div style={{
+                              maxWidth: "80%",
+                              background: msg.from_owner ? "rgba(201,136,76,0.12)" : "rgba(255,255,255,0.04)",
+                              border: `1px solid ${msg.from_owner ? "rgba(201,136,76,0.35)" : "var(--border)"}`,
+                              borderRadius: msg.from_owner ? "12px 2px 12px 12px" : "2px 12px 12px 12px",
+                              padding: "8px 12px",
+                            }}>
+                              <p style={{ margin: 0, fontSize: 12, color: "var(--foreground)", lineHeight: 1.6 }}>{msg.content}</p>
+                            </div>
+                            <span style={{ fontSize: 9, color: "var(--muted)" }}>
+                              {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Répondre */}
+                      <div style={{ padding: "0 16px 14px", display: "flex", gap: 8 }}>
+                        <input
+                          value={replyInput}
+                          onChange={(e) => setReplyInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleReply(c.user_id); }}
+                          placeholder="Répondre…"
+                          style={{
+                            flex: 1, padding: "8px 12px",
+                            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,136,76,0.3)",
+                            borderRadius: 4, color: "var(--foreground)", fontSize: 12,
+                            outline: "none", fontFamily: "inherit",
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(201,136,76,0.6)")}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(201,136,76,0.3)")}
+                        />
+                        <button onClick={() => handleReply(c.user_id)} disabled={!replyInput.trim() || replying} style={{
+                          padding: "8px 14px", background: replyInput.trim() ? "rgba(201,136,76,0.15)" : "transparent",
+                          border: `1px solid ${replyInput.trim() ? "rgba(201,136,76,0.5)" : "var(--border)"}`,
+                          borderRadius: 4, color: replyInput.trim() ? "#c9884c" : "var(--muted)",
+                          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: replyInput.trim() ? "pointer" : "not-allowed",
+                        }}>
+                          {replying ? "…" : "Envoyer"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 

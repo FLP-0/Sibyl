@@ -8,11 +8,12 @@ import FeedTab from "./FeedTab";
 import ProfileTab from "./ProfileTab";
 import AdminTab from "./AdminTab";
 import HomeTab from "./HomeTab";
+import ModTab from "./ModTab";
 import SearchOverlay from "./SearchOverlay";
 
 const DEFAULT_spaceId = "831eda8b-5972-4250-8ac4-bb536ee0d0f5";
 const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
-type Tab = "home" | "chat" | "feed" | "profile" | "admin";
+type Tab = "home" | "chat" | "feed" | "profile" | "admin" | "mod";
 
 export default function FeedPage() {
   return <Suspense><FeedPageInner /></Suspense>;
@@ -151,6 +152,7 @@ function FeedPageInner() {
           <SidebarTab label="Chat" active={tab === "chat"} onClick={() => { setTab("chat"); setUnread((u) => ({ ...u, chat: false })); }} icon={<ChatIcon />} hasUnread={unread.chat} />
           <SidebarTab label="Feed" active={tab === "feed"} onClick={() => { setTab("feed"); setUnread((u) => ({ ...u, feed: false })); }} icon={<FeedIcon />} hasUnread={unread.feed} />
           <SidebarTab label="Profil" active={tab === "profile"} onClick={() => setTab("profile")} icon={<ProfileIcon />} />
+          <SidebarTab label="Modération" active={tab === "mod"} onClick={() => setTab("mod")} icon={<ModIcon />} accent="#c9884c" />
           {isAdmin && (
             <SidebarTab label="Admin" active={tab === "admin"} onClick={() => setTab("admin")} icon={<AdminIcon />} accent="#c9884c" />
           )}
@@ -234,6 +236,7 @@ function FeedPageInner() {
           {tab === "chat" && <ChatTab userId={userId} pseudo={pseudo} spaceId={spaceId} isFounder={isOwner} />}
           {tab === "feed" && <FeedTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
           {tab === "profile" && <ProfileTab userId={userId} pseudo={pseudo} spaceId={spaceId} setPseudo={(p) => setPseudo(p)} />}
+          {tab === "mod" && <ModTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
           {tab === "admin" && isAdmin && <AdminTab userId={userId} spaceId={spaceId} currentUserRole={role} isOwner={isOwner} />}
         </div>
       </main>
@@ -351,6 +354,9 @@ function ProfileIcon() {
 }
 function AdminIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>;
+}
+function ModIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" /></svg>;
 }
 function SearchIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>;
