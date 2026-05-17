@@ -68,8 +68,19 @@ export default function LoginPage() {
       return;
     }
 
-    const space = (spaces as { id: string; name: string }[])[0];
+    const space = (spaces as { id: string; name: string; open_access: boolean }[])[0];
 
+    if (space.open_access) {
+      // Accès libre : auto-rejoindre si pas encore membre
+      await supabase.from("space_members").upsert(
+        { space_id: space.id, user_id: sessionUserId, role: "member" },
+        { onConflict: "space_id,user_id", ignoreDuplicates: true }
+      );
+      router.push(`/feed?space=${space.id}`);
+      return;
+    }
+
+    // Accès restreint : vérifier l'appartenance
     const { data: member } = await supabase
       .from("space_members")
       .select("role")

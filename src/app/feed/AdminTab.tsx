@@ -77,6 +77,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const [actionLoading, setActionLoading] = useState(false);
   const [savingSpace, setSavingSpace] = useState(false);
   const [spaceSuccess, setSpaceSuccess] = useState(false);
+  const [openAccess, setOpenAccess] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
   const [bans, setBans] = useState<Map<string, BanInfo>>(new Map());
   const [banDuration, setBanDuration] = useState("3600");
@@ -100,7 +101,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
       supabase.from("posts").select("id", { count: "exact", head: true }).eq("space_id", spaceId),
       supabase.from("messages").select("id", { count: "exact", head: true }).eq("space_id", spaceId),
       supabase.from("reactions").select("id", { count: "exact", head: true }),
-      supabase.from("spaces").select("name, description, code").eq("id", spaceId).single(),
+      supabase.from("spaces").select("name, description, code, open_access").eq("id", spaceId).single(),
     ]);
 
     if (spaceData) {
@@ -108,6 +109,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
       setSpaceDesc(spaceData.description ?? "");
       setSpaceCode(spaceData.code ?? "");
       setNewCode(spaceData.code ?? "");
+      setOpenAccess(spaceData.open_access ?? false);
     }
 
     if (!membersData) { setLoading(false); return; }
@@ -300,6 +302,12 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setConfirm(null);
     await buildContentFeed(members);
     setActionLoading(false);
+  };
+
+  const handleToggleOpenAccess = async () => {
+    const next = !openAccess;
+    setOpenAccess(next);
+    await supabase.from("spaces").update({ open_access: next }).eq("id", spaceId);
   };
 
   const handleSaveSpace = async () => {
@@ -971,6 +979,49 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                 <input value={newCode} onChange={(e) => setNewCode(e.target.value)} maxLength={10} style={{ ...inputStyle, fontFamily: "monospace", letterSpacing: "0.15em" }} />
                 <span style={{ fontSize: 10, color: "var(--muted)", marginTop: 4 }}>Actuel : <strong style={{ color: "var(--foreground)" }}>{spaceCode}</strong></span>
               </Field>
+              {/* Accès libre */}
+              <div style={{
+                padding: "14px 16px",
+                background: openAccess ? "rgba(138,127,248,0.06)" : "rgba(255,255,255,0.02)",
+                border: `1px solid ${openAccess ? "rgba(138,127,248,0.25)" : "var(--border)"}`,
+                borderRadius: 6,
+                transition: "all 0.25s",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                  <div>
+                    <p style={{ margin: "0 0 3px", fontSize: 12, color: "var(--foreground)", fontWeight: 500 }}>
+                      Accès libre par sésame
+                    </p>
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+                      {openAccess
+                        ? "Tout utilisateur connecté avec le sésame peut entrer sans invitation."
+                        : "Seuls les membres invités peuvent accéder à cet espace."}
+                    </p>
+                  </div>
+                  {/* Toggle switch */}
+                  <button
+                    onClick={handleToggleOpenAccess}
+                    style={{
+                      width: 44, height: 24, borderRadius: 12, flexShrink: 0,
+                      background: openAccess ? "var(--accent)" : "var(--border)",
+                      border: "none", cursor: "pointer", position: "relative",
+                      transition: "background 0.25s",
+                    }}
+                  >
+                    <span style={{
+                      position: "absolute",
+                      top: 3,
+                      left: openAccess ? 23 : 3,
+                      width: 18, height: 18, borderRadius: "50%",
+                      background: "#fff",
+                      transition: "left 0.25s",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.35)",
+                      display: "block",
+                    }} />
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <button onClick={handleSaveSpace} disabled={savingSpace} style={{
                   padding: "10px 24px", background: "rgba(201,136,76,0.15)", border: "1px solid #c9884c",
