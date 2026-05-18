@@ -10,11 +10,14 @@ import AdminTab from "./AdminTab";
 import HomeTab from "./HomeTab";
 import ModTab from "./ModTab";
 import StaffTab from "./StaffTab";
+import RewardsTab from "./RewardsTab";
+import DMTab from "./DMTab";
 import SearchOverlay from "./SearchOverlay";
+import { awardXP, XP_LABELS, BADGE_NAMES } from "@/lib/rewards";
 
 const DEFAULT_spaceId = "831eda8b-5972-4250-8ac4-bb536ee0d0f5";
 const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
-type Tab = "home" | "chat" | "feed" | "profile" | "admin" | "mod" | "staff";
+type Tab = "home" | "chat" | "feed" | "profile" | "admin" | "mod" | "staff" | "rewards" | "dm";
 
 export default function FeedPage() {
   return <Suspense><FeedPageInner /></Suspense>;
@@ -33,10 +36,32 @@ function FeedPageInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [mentionToast, setMentionToast] = useState<{ from: string; content: string } | null>(null);
   const [founderToast, setFounderToast] = useState<{ from: string; content: string; kind: "message" | "post" } | null>(null);
+  const [accessReqToast, setAccessReqToast] = useState<{ pseudo: string } | null>(null);
+  const [xpToast, setXpToast] = useState<{ amount: number; label: string; badges: string[]; leveledUp: boolean } | null>(null);
+  const [dmUnread, setDmUnread] = useState(false);
+  const [maintenance, setMaintenance] = useState<{ message: string | null } | null>(null);
+  const [impersonating, setImpersonating] = useState<{ pseudo: string } | null>(null);
   const tabRef = useRef<Tab>("home");
   const userIdRef = useRef<string | null>(null);
   const pseudoRef = useRef<string | null>(null);
   const notifChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  useEffect(() => {
+    const imp = localStorage.getItem("sibyl_impersonating");
+    if (imp) {
+      try { setImpersonating(JSON.parse(imp)); } catch { /* ignore */ }
+    }
+  }, []);
+
+  const handleExitImpersonation = async () => {
+    const saved = localStorage.getItem("sibyl_owner_session");
+    if (!saved) return;
+    const { access_token, refresh_token } = JSON.parse(saved);
+    localStorage.removeItem("sibyl_owner_session");
+    localStorage.removeItem("sibyl_impersonating");
+    await supabase.auth.setSession({ access_token, refresh_token });
+    window.location.href = "/superadmin";
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -55,13 +80,37 @@ function FeedPageInner() {
       setPseudo(data.session.user.user_metadata?.pseudo ?? "Initié");
       setIsOwner((data.session.user.email ?? "").toLowerCase() === OWNER_EMAIL.toLowerCase());
 
-      const { data: member } = await supabase
-        .from("space_members")
-        .select("role")
+      // Vérifier si banni
+      const { data: ban } = await supabase
+        .from("bans")
+        .select("banned_until")
         .eq("user_id", uid)
         .eq("space_id", spaceId)
-        .single();
+        .maybeSingle();
+      if (ban) {
+        const isActive = !ban.banned_until || new Date(ban.banned_until) > new Date();
+        if (isActive) { router.push("/"); return; }
+      }
+
+      const [{ data: member }, { data: spaceData }] = await Promise.all([
+        supabase.from("space_members").select("role").eq("user_id", uid).eq("space_id", spaceId).single(),
+        supabase.from("spaces").select("maintenance_mode, maintenance_message").eq("id", spaceId).single(),
+      ]);
       setRole(member?.role ?? "member");
+
+      const isOwnerVal = (data.session.user.email ?? "").toLowerCase() === OWNER_EMAIL.toLowerCase();
+      if (spaceData?.maintenance_mode && !isOwnerVal) {
+        setMaintenance({ message: spaceData.maintenance_message ?? null });
+      }
+
+      // XP connexion quotidienne
+      awardXP("daily_login").then((result) => {
+        if (result && !result.skipped) {
+          const badgeNames = result.newBadges.map((b) => BADGE_NAMES[b] ?? b);
+          setXpToast({ amount: result.amount, label: XP_LABELS["daily_login"], badges: badgeNames, leveledUp: result.leveledUp });
+          setTimeout(() => setXpToast(null), 4000);
+        }
+      });
     });
   }, [router]);
 
@@ -140,6 +189,59 @@ function FeedPageInner() {
     };
   }, [userId]);
 
+  // Maintenance en temps réel
+  useEffect(() => {
+    if (!userId || userId === "dev-user" || isOwner) return;
+    const channel = supabase
+      .channel("maintenance-" + spaceId)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "spaces", filter: `id=eq.${spaceId}` },
+        (payload) => {
+          const row = payload.new as { maintenance_mode: boolean; maintenance_message: string | null };
+          if (row.maintenance_mode) setMaintenance({ message: row.maintenance_message ?? null });
+          else setMaintenance(null);
+        })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId, spaceId, isOwner]);
+
+  // Kick en temps réel si banni
+  useEffect(() => {
+    if (!userId || userId === "dev-user") return;
+    const channel = supabase
+      .channel("ban-watch-" + userId + "-" + spaceId)
+      .on("postgres_changes", {
+        event: "INSERT", schema: "public", table: "bans",
+        filter: `user_id=eq.${userId}`,
+      }, (payload) => {
+        const row = payload.new as { space_id: string };
+        if (row.space_id === spaceId) router.push("/");
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId, spaceId, router]);
+
+  // Notification admin : nouvelle demande d'accès
+  useEffect(() => {
+    if (!userId || userId === "dev-user") return;
+    const isAdmin = role === "admin" || isOwner;
+    if (!isAdmin) return;
+    const channel = supabase
+      .channel("access-req-notif-" + spaceId)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "access_requests", filter: `space_id=eq.${spaceId}` }, async (payload) => {
+        const row = payload.new as { user_id: string };
+        const { data } = await supabase.from("profiles").select("pseudo").eq("id", row.user_id).single();
+        setAccessReqToast({ pseudo: data?.pseudo ?? "Quelqu'un" });
+        setTimeout(() => setAccessReqToast(null), 8000);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId, spaceId, role, isOwner]);
+
+  const handleXpGained = (amount: number, label: string, badges: string[], leveledUp: boolean) => {
+    setXpToast({ amount, label, badges, leveledUp });
+    setTimeout(() => setXpToast(null), 4000);
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/");
@@ -148,6 +250,30 @@ function FeedPageInner() {
   if (!pseudo || !userId) return null;
 
   const isAdmin = role === "admin" || isOwner;
+
+  // Écran maintenance (jamais affiché au fondateur)
+  if (maintenance && !isOwner) return (
+    <div style={{
+      height: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--background)", flexDirection: "column", gap: 16, padding: 32,
+    }}>
+      <div style={{
+        fontSize: 28, color: "#e05555", opacity: 0.7, fontFamily: "Georgia, serif",
+        letterSpacing: "0.06em",
+      }}>⚠</div>
+      <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif", color: "var(--foreground)", letterSpacing: "0.04em" }}>
+        Maintenance en cours
+      </div>
+      {maintenance.message && (
+        <p style={{ fontSize: 13, color: "var(--muted)", textAlign: "center", maxWidth: 400, lineHeight: 1.7, margin: 0 }}>
+          {maintenance.message}
+        </p>
+      )}
+      <p style={{ fontSize: 10, color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase", margin: 0, marginTop: 8 }}>
+        L&apos;espace sera bientôt disponible
+      </p>
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--background)", overflow: "hidden" }}>
@@ -171,6 +297,9 @@ function FeedPageInner() {
           <SidebarTab label="Chat" active={tab === "chat"} onClick={() => { setTab("chat"); setUnread((u) => ({ ...u, chat: false })); }} icon={<ChatIcon />} hasUnread={unread.chat} />
           <SidebarTab label="Feed" active={tab === "feed"} onClick={() => { setTab("feed"); setUnread((u) => ({ ...u, feed: false })); }} icon={<FeedIcon />} hasUnread={unread.feed} />
           <SidebarTab label="Profil" active={tab === "profile"} onClick={() => setTab("profile")} icon={<ProfileIcon />} />
+          <SidebarTab label="DMs" active={tab === "dm"} onClick={() => { setTab("dm"); setDmUnread(false); }} icon={<DMIcon />} hasUnread={dmUnread} />
+          <SidebarTab label="Gloire" active={tab === "rewards"} onClick={() => setTab("rewards")} icon={<RewardsIcon />} />
+
           {role === "member" && (
             <SidebarTab label="Modération" active={tab === "mod"} onClick={() => setTab("mod")} icon={<ModIcon />} accent="#c9884c" />
           )}
@@ -256,9 +385,12 @@ function FeedPageInner() {
       {/* Contenu */}
       <main className="sibyl-main" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div key={tab} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", animation: "fadeIn 0.18s ease" }}>
-          {tab === "home" && <HomeTab pseudo={pseudo} spaceId={spaceId} />}
-          {tab === "chat" && <ChatTab userId={userId} pseudo={pseudo} spaceId={spaceId} isFounder={isOwner} />}
-          {tab === "feed" && <FeedTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
+          {tab === "home" && <HomeTab userId={userId!} pseudo={pseudo} spaceId={spaceId} role={role} />}
+          {tab === "chat" && <ChatTab userId={userId} pseudo={pseudo} spaceId={spaceId} isFounder={isOwner} onXpGained={handleXpGained} />}
+          {tab === "feed" && <FeedTab userId={userId} pseudo={pseudo} spaceId={spaceId} onXpGained={handleXpGained} />}
+          {tab === "dm" && <DMTab userId={userId!} spaceId={spaceId} onUnreadChange={(has) => { if (tab !== "dm") setDmUnread(has); }} />}
+          {tab === "rewards" && <RewardsTab userId={userId!} spaceId={spaceId} />}
+
           {tab === "profile" && <ProfileTab userId={userId} pseudo={pseudo} spaceId={spaceId} setPseudo={(p) => setPseudo(p)} />}
           {tab === "mod" && <ModTab userId={userId} pseudo={pseudo} spaceId={spaceId} />}
           {tab === "staff" && (role === "moderator" || isAdmin) && <StaffTab userId={userId} pseudo={pseudo} role={role} spaceId={spaceId} />}
@@ -266,6 +398,36 @@ function FeedPageInner() {
         </div>
       </main>
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} userId={userId} spaceId={spaceId} />}
+
+      {impersonating && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 700,
+          background: "rgba(201,76,76,0.95)", backdropFilter: "blur(8px)",
+          padding: "10px 20px",
+          display: "flex", alignItems: "center", gap: 12,
+          boxShadow: "0 2px 16px rgba(201,76,76,0.4)",
+          animation: "fadeIn 0.2s ease",
+        }}>
+          <span style={{ fontSize: 14 }}>♟</span>
+          <span style={{ flex: 1, fontSize: 12, color: "#fff", letterSpacing: "0.04em" }}>
+            Vous incarnez <strong>{impersonating.pseudo}</strong> — vue en lecture seule
+          </span>
+          <button
+            onClick={handleExitImpersonation}
+            style={{
+              padding: "5px 14px", background: "rgba(255,255,255,0.2)",
+              border: "1px solid rgba(255,255,255,0.4)", borderRadius: 4,
+              color: "#fff", fontSize: 10, letterSpacing: "0.12em",
+              textTransform: "uppercase", cursor: "pointer",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.3)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.2)")}
+          >
+            Quitter
+          </button>
+        </div>
+      )}
 
       {founderToast && (
         <div style={{
@@ -296,6 +458,61 @@ function FeedPageInner() {
             fontSize: 18, lineHeight: 1, flexShrink: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>×</button>
+        </div>
+      )}
+
+      {accessReqToast && (
+        <div style={{
+          position: "fixed", bottom: 110, right: 24, zIndex: 500,
+          background: "var(--surface)", border: "1px solid rgba(201,136,76,0.5)",
+          borderRadius: 8, padding: "14px 18px", maxWidth: 300,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+          animation: "fadeIn 0.2s ease",
+        }}>
+          <div style={{ fontSize: 10, color: "#c9884c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>
+            Nouvelle demande d&apos;accès
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--foreground)", lineHeight: 1.5 }}>
+            <strong>{accessReqToast.pseudo}</strong> souhaite rejoindre l&apos;espace.
+          </p>
+          <button onClick={() => setAccessReqToast(null)} style={{
+            position: "absolute", top: 8, right: 10,
+            background: "transparent", border: "none", color: "var(--muted)",
+            cursor: "pointer", fontSize: 16, lineHeight: 1,
+          }}>×</button>
+        </div>
+      )}
+
+      {xpToast && (
+        <div style={{
+          position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)",
+          zIndex: 800, pointerEvents: "none",
+          animation: "fadeIn 0.25s ease",
+        }}>
+          <div style={{
+            background: "var(--surface)",
+            border: `1px solid ${xpToast.leveledUp ? "rgba(212,175,55,0.6)" : "rgba(124,111,247,0.4)"}`,
+            borderRadius: 10,
+            padding: "10px 20px",
+            boxShadow: `0 8px 32px rgba(0,0,0,0.5), 0 0 20px ${xpToast.leveledUp ? "rgba(212,175,55,0.15)" : "rgba(124,111,247,0.1)"}`,
+            minWidth: 200, textAlign: "center",
+          }}>
+            <div style={{
+              fontSize: 13, fontWeight: 700,
+              color: xpToast.leveledUp ? "#d4af37" : "var(--accent)",
+              letterSpacing: "0.04em", fontFamily: "Georgia, serif",
+            }}>
+              {xpToast.leveledUp ? "✦ Niveau supérieur !" : `+${xpToast.amount} XP`}
+              <span style={{ fontSize: 11, fontWeight: 400, color: "var(--muted)", marginLeft: 8 }}>
+                {xpToast.leveledUp ? `+${xpToast.amount} XP · ` : "· "}{xpToast.label}
+              </span>
+            </div>
+            {xpToast.badges.length > 0 && (
+              <div style={{ fontSize: 10, color: "#d4af37", marginTop: 4, letterSpacing: "0.06em" }}>
+                ✦ Nouveau badge : {xpToast.badges.join(", ")}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -391,6 +608,12 @@ function SearchIcon() {
 }
 function LogoutIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>;
+}
+function DMIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4h16v12H4z" rx="2"/><path d="M4 4l8 8 8-8" /></svg>;
+}
+function RewardsIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>;
 }
 function CrownIcon() {
   return (

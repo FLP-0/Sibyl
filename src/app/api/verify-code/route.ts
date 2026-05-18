@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const SPACE_ID = "831eda8b-5972-4250-8ac4-bb536ee0d0f5";
-
 export async function POST(req: NextRequest) {
   const { code } = await req.json();
 
@@ -17,21 +15,21 @@ export async function POST(req: NextRequest) {
 
   const normalizedCode = code.trim().toUpperCase();
 
-  // Vérifier le sésame de l'espace
+  // Vérifier si c'est un sésame d'espace
   const { data: spaceData } = await supabase
     .from("spaces")
-    .select("code")
-    .eq("id", SPACE_ID)
+    .select("id")
+    .eq("code", normalizedCode)
     .single();
 
-  if (spaceData && normalizedCode === spaceData.code?.trim().toUpperCase()) {
-    return NextResponse.json({ valid: true, spaceId: SPACE_ID });
+  if (spaceData) {
+    return NextResponse.json({ valid: true, spaceId: spaceData.id });
   }
 
-  // Vérifier les codes d'invitation
+  // Vérifier si c'est un code d'invitation
   const { data: invite } = await supabase
     .from("invitations")
-    .select("id, status, expires_at")
+    .select("id, space_id, status, expires_at")
     .eq("code", normalizedCode)
     .eq("status", "pending")
     .gt("expires_at", new Date().toISOString())
@@ -41,5 +39,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ valid: false }, { status: 400 });
   }
 
-  return NextResponse.json({ valid: true, spaceId: SPACE_ID, inviteId: invite.id });
+  return NextResponse.json({ valid: true, spaceId: invite.space_id, inviteId: invite.id });
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { awardXP, BADGE_NAMES, XP_LABELS } from "@/lib/rewards";
 import UserPopup from "./UserPopup";
 import ProfilePanel from "./ProfilePanel";
 
@@ -13,6 +14,8 @@ type Message = {
   author_id: string;
   pseudo: string;
   is_superadmin?: boolean;
+  role?: string;
+  prestigeBadge?: "resonance" | "magnetisme";
 };
 
 function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
@@ -31,7 +34,9 @@ function renderWithMentions(text: string) {
   );
 }
 
-export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId: string; pseudo: string; spaceId: string; isFounder?: boolean }) {
+type OnXpGained = (amount: number, label: string, badges: string[], leveledUp: boolean) => void;
+
+export default function ChatTab({ userId, pseudo, spaceId, isFounder, onXpGained }: { userId: string; pseudo: string; spaceId: string; isFounder?: boolean; onXpGained?: OnXpGained }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -46,6 +51,8 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
   const inputRef = useRef<HTMLInputElement>(null);
   const profileCache = useRef<Record<string, string>>({});
   const superAdminCache = useRef<Record<string, boolean>>({});
+  const roleCache = useRef<Record<string, string>>({});
+  const prestigeCache = useRef<Record<string, "resonance" | "magnetisme">>({});
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
@@ -90,12 +97,20 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
           if (row.space_id !== spaceId) return;
           let authorPseudo = profileCache.current[row.author_id];
           if (!authorPseudo) {
-            const { data } = await supabase.from("profiles").select("pseudo, is_superadmin").eq("id", row.author_id).single();
-            authorPseudo = data?.pseudo ?? "Membre";
+            const [{ data: profData }, { data: memberData }, { data: badgeData }] = await Promise.all([
+              supabase.from("profiles").select("pseudo, is_superadmin").eq("id", row.author_id).single(),
+              supabase.from("space_members").select("role").eq("user_id", row.author_id).eq("space_id", spaceId).maybeSingle(),
+              supabase.from("user_badges").select("badge_id").eq("user_id", row.author_id).in("badge_id", ["magnetisme", "resonance"]),
+            ]);
+            authorPseudo = profData?.pseudo ?? "Membre";
             profileCache.current[row.author_id] = authorPseudo;
-            superAdminCache.current[row.author_id] = data?.is_superadmin ?? false;
+            superAdminCache.current[row.author_id] = profData?.is_superadmin ?? false;
+            roleCache.current[row.author_id] = memberData?.role ?? "member";
+            const badges = (badgeData ?? []).map((b: { badge_id: string }) => b.badge_id);
+            if (badges.includes("magnetisme")) prestigeCache.current[row.author_id] = "magnetisme";
+            else if (badges.includes("resonance")) prestigeCache.current[row.author_id] = "resonance";
           }
-          setMessages((prev) => mergeMessages(prev, [{ ...row, pseudo: authorPseudo, is_superadmin: superAdminCache.current[row.author_id] ?? false }]));
+          setMessages((prev) => mergeMessages(prev, [{ ...row, pseudo: authorPseudo, is_superadmin: superAdminCache.current[row.author_id] ?? false, role: roleCache.current[row.author_id], prestigeBadge: prestigeCache.current[row.author_id] }]));
         }
       )
       .subscribe((status) => {
@@ -125,20 +140,28 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
     if (!data || data.length === 0) return;
 
     const authorIds = [...new Set(data.map((m) => m.author_id))];
-    const { data: profilesData } = await supabase
-      .from("profiles")
-      .select("id, pseudo, is_superadmin")
-      .in("id", authorIds);
+    const [{ data: profilesData }, { data: membersData }, { data: badgeData }] = await Promise.all([
+      supabase.from("profiles").select("id, pseudo, is_superadmin").in("id", authorIds),
+      supabase.from("space_members").select("user_id, role").eq("space_id", spaceId).in("user_id", authorIds),
+      supabase.from("user_badges").select("user_id, badge_id").in("user_id", authorIds).in("badge_id", ["magnetisme", "resonance"]),
+    ]);
 
     (profilesData ?? []).forEach((p) => {
       profileCache.current[p.id] = p.pseudo;
       superAdminCache.current[p.id] = p.is_superadmin ?? false;
+    });
+    (membersData ?? []).forEach((m) => { roleCache.current[m.user_id] = m.role; });
+    (badgeData ?? []).forEach((b: { user_id: string; badge_id: string }) => {
+      if (b.badge_id === "magnetisme") prestigeCache.current[b.user_id] = "magnetisme";
+      else if (b.badge_id === "resonance" && prestigeCache.current[b.user_id] !== "magnetisme") prestigeCache.current[b.user_id] = "resonance";
     });
 
     const loaded = data.map((m) => ({
       ...m,
       pseudo: profileCache.current[m.author_id] ?? "Membre",
       is_superadmin: superAdminCache.current[m.author_id] ?? false,
+      role: roleCache.current[m.author_id],
+      prestigeBadge: prestigeCache.current[m.author_id] as "resonance" | "magnetisme" | undefined,
     }));
     setMessages((prev) => mergeMessages(prev, loaded));
   };
@@ -188,8 +211,12 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
 
     if (!error && data) {
       setMessages((prev) => mergeMessages(prev, [{ ...data, pseudo, is_superadmin: isFounder ?? false }]));
+      awardXP("message_sent", { spaceId }).then((result) => {
+        if (result && !result.skipped) {
+          onXpGained?.(result.amount, XP_LABELS["message_sent"], result.newBadges.map((b) => BADGE_NAMES[b] ?? b), result.leveledUp);
+        }
+      });
     } else {
-      // en cas d'erreur, recharge tout
       await loadMessages();
     }
     setSending(false);
@@ -263,6 +290,18 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
                 >
                   {msg.pseudo || "Membre"}
                 </span>
+                {!isSA && msg.role === "admin" && (
+                  <span style={{ fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, color: "#c9884c", background: "rgba(201,136,76,0.1)", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 6px" }}>admin</span>
+                )}
+                {!isSA && msg.role === "moderator" && (
+                  <span style={{ fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, color: "var(--accent)", background: "rgba(124,111,247,0.1)", border: "1px solid rgba(124,111,247,0.4)", borderRadius: 3, padding: "2px 6px" }}>modo</span>
+                )}
+                {msg.prestigeBadge === "magnetisme" && (
+                  <span title="Magnétisme" style={{ fontSize: 11, color: "#d4af37", lineHeight: 1, filter: "drop-shadow(0 0 5px rgba(212,175,55,0.7))" }}>✦</span>
+                )}
+                {msg.prestigeBadge === "resonance" && (
+                  <span title="Résonance" style={{ fontSize: 12, color: "#c9884c", lineHeight: 1, opacity: 0.85 }}>◈</span>
+                )}
                 <span style={{ fontSize: 10, color: "var(--muted)" }}>
                   {new Date(msg.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
                 </span>
@@ -283,6 +322,7 @@ export default function ChatTab({ userId, pseudo, spaceId, isFounder }: { userId
           onClose={() => setPopup(null)}
           onViewProfile={(uid) => { setPopup(null); setProfilePanel(uid); }}
           spaceId={spaceId}
+          currentUserId={userId}
         />
       )}
       {profilePanel && (

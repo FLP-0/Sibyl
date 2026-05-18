@@ -15,14 +15,19 @@ function makeCode(): string {
   return code;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const spaceId = req.nextUrl.searchParams.get("space_id");
   const supabase = getClient();
 
-  const { data: invitations, error } = await supabase
+  let query = supabase
     .from("invitations")
     .select("id, code, status, expires_at, created_at, invited_by, used_by")
     .order("created_at", { ascending: false })
     .limit(50);
+
+  if (spaceId) query = query.eq("space_id", spaceId);
+
+  const { data: invitations, error } = await query;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -49,7 +54,11 @@ export async function GET() {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(req: NextRequest) {
-  const { userId } = await req.json();
+  const { userId, spaceId } = await req.json();
+
+  if (!spaceId || !UUID_RE.test(spaceId)) {
+    return NextResponse.json({ error: "spaceId manquant ou invalide" }, { status: 400 });
+  }
 
   const supabase = getClient();
   const code = makeCode();
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("invitations")
-    .insert({ code, invited_by: invitedBy, expires_at: expiresAt.toISOString(), status: "pending" })
+    .insert({ code, invited_by: invitedBy, space_id: spaceId, expires_at: expiresAt.toISOString(), status: "pending" })
     .select()
     .single();
 

@@ -75,7 +75,7 @@ export default function RegisterPage() {
     }
 
     // Créer le compte
-    const { error: signUpError } = await supabase.auth.signUp({
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { pseudo, space_id: spaceId } },
@@ -97,10 +97,15 @@ export default function RegisterPage() {
       return;
     }
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const uid = sessionData?.session?.user?.id;
+    const uid = signUpData?.user?.id;
 
-    if (isOwner && uid) {
+    if (!uid) {
+      setError("Vérifie ta boîte mail pour confirmer ton compte.");
+      setLoading(false);
+      return;
+    }
+
+    if (isOwner) {
       // Passe le rôle à admin
       await fetch("/api/owner-setup", {
         method: "POST",
@@ -111,7 +116,7 @@ export default function RegisterPage() {
       return;
     }
 
-    if (inviteId && uid) {
+    if (inviteId) {
       await fetch("/api/invitations/use", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

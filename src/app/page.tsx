@@ -21,6 +21,11 @@ export default function LoginPage() {
   const [focused, setFocused]       = useState<string | null>(null);
   const [mounted, setMounted]       = useState(false);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [deniedSpace, setDeniedSpace] = useState<{ id: string; name: string; allowRequests: boolean } | null>(null);
+  const [existingRequest, setExistingRequest] = useState<"pending" | "rejected" | null>(null);
+  const [requestSent, setRequestSent] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
@@ -68,7 +73,13 @@ export default function LoginPage() {
       return;
     }
 
-    const space = (spaces as { id: string; name: string; open_access: boolean }[])[0];
+    const space = (spaces as { id: string; name: string; open_access: boolean; allow_space_requests: boolean; maintenance_mode: boolean; maintenance_message: string | null }[])[0];
+
+    if (space.maintenance_mode) {
+      setError(space.maintenance_message?.trim() || "Cet espace est en maintenance. Revenez plus tard.");
+      setLoading(false);
+      return;
+    }
 
     if (space.open_access) {
       // Accès libre : auto-rejoindre si pas encore membre
@@ -89,12 +100,57 @@ export default function LoginPage() {
       .maybeSingle();
 
     if (!member) {
-      setError("Tu n'es pas membre de cet espace.");
+      const { data: existingReq } = await supabase
+        .from("access_requests")
+        .select("status")
+        .eq("space_id", space.id)
+        .eq("user_id", sessionUserId)
+        .maybeSingle();
+      setDeniedSpace({ id: space.id, name: space.name, allowRequests: space.allow_space_requests ?? true });
+      setExistingRequest((existingReq?.status as "pending" | "rejected") ?? null);
+      setRequestSent(existingReq?.status === "pending");
+      setError(`L'accès à « ${space.name} » est sur invitation.`);
       setLoading(false);
       return;
     }
 
+    // Vérifier si banni
+    const { data: ban } = await supabase
+      .from("bans")
+      .select("banned_until")
+      .eq("user_id", sessionUserId)
+      .eq("space_id", space.id)
+      .maybeSingle();
+
+    if (ban) {
+      const isActive = !ban.banned_until || new Date(ban.banned_until) > new Date();
+      if (isActive) {
+        setError(ban.banned_until
+          ? `Tu es banni de cet espace jusqu'au ${new Date(ban.banned_until).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}.`
+          : "Tu as été banni définitivement de cet espace.");
+        setLoading(false);
+        return;
+      }
+    }
+
     router.push(`/feed?space=${space.id}`);
+  };
+
+  const handleRequestAccess = async () => {
+    if (!deniedSpace || !sessionUserId || requesting) return;
+    setRequesting(true);
+    const { error: reqError } = await supabase.from("access_requests").upsert(
+      { space_id: deniedSpace.id, user_id: sessionUserId, status: "pending" },
+      { onConflict: "space_id,user_id" }
+    );
+    if (reqError) {
+      setError("Impossible d'envoyer la demande : " + reqError.message);
+      setRequesting(false);
+      return;
+    }
+    setRequestSent(true);
+    setExistingRequest("pending");
+    setRequesting(false);
   };
 
   const canProceed = step === 1 ? (!!email && !!password) : !!code.trim();
@@ -240,17 +296,43 @@ export default function LoginPage() {
                   Oublié ?
                 </a>
               </div>
-              <input
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError(null); }}
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                onFocus={() => setFocused("password")}
-                onBlur={() => setFocused(null)}
-                style={inputStyle(focused === "password")}
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  onFocus={() => setFocused("password")}
+                  onBlur={() => setFocused(null)}
+                  style={{ ...inputStyle(focused === "password"), paddingRight: 42 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={{
+                    position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+                    background: "transparent", border: "none", cursor: "pointer",
+                    color: showPassword ? "var(--accent)" : "var(--muted)",
+                    padding: 0, display: "flex", alignItems: "center",
+                    transition: "color 0.15s",
+                  }}
+                >
+                  {showPassword ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
           </>)}
 
@@ -262,10 +344,11 @@ export default function LoginPage() {
               </label>
               <input
                 type="text"
+                inputMode="numeric"
                 autoComplete="off"
                 placeholder="000000"
                 value={code}
-                onChange={(e) => { setCode(e.target.value.toUpperCase()); setError(null); }}
+                onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setCode(v); setError(null); setDeniedSpace(null); setRequestSent(false); setExistingRequest(null); }}
                 onKeyDown={(e) => e.key === "Enter" && handleSpace()}
                 onFocus={() => setFocused("code")}
                 onBlur={() => setFocused(null)}
@@ -287,6 +370,40 @@ export default function LoginPage() {
             <p style={{ fontSize: 11, color: "#c94c4c", margin: 0, letterSpacing: "0.02em" }}>
               {error}
             </p>
+          )}
+
+          {/* Demande d'accès */}
+          {deniedSpace && step === 2 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {!deniedSpace.allowRequests ? (
+                <p style={{ fontSize: 11, color: "var(--muted)", margin: 0, letterSpacing: "0.02em", fontStyle: "italic" }}>
+                  Les demandes d&apos;accès sont désactivées pour cet espace.
+                </p>
+              ) : requestSent || existingRequest === "pending" ? (
+                <p style={{ fontSize: 11, color: "#4caf6e", margin: 0, letterSpacing: "0.02em" }}>
+                  Demande envoyée — en attente de validation par l&apos;admin.
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestAccess}
+                  disabled={requesting}
+                  style={{
+                    width: "100%", padding: "11px 0",
+                    background: "rgba(201,136,76,0.08)",
+                    border: "1px solid rgba(201,136,76,0.35)",
+                    borderRadius: 4, color: "#c9884c",
+                    fontSize: 10, fontWeight: 500, letterSpacing: "0.16em",
+                    textTransform: "uppercase", cursor: requesting ? "not-allowed" : "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                  onMouseEnter={(e) => { if (!requesting) e.currentTarget.style.background = "rgba(201,136,76,0.16)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(201,136,76,0.08)"; }}
+                >
+                  {requesting ? "Envoi…" : existingRequest === "rejected" ? "Demander à nouveau l'accès" : "Demander l'accès"}
+                </button>
+              )}
+            </div>
           )}
 
           {/* Bouton */}

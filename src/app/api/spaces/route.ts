@@ -72,6 +72,22 @@ export async function POST(req: Request) {
   return NextResponse.json(data, { status: 201 });
 }
 
+// PATCH /api/spaces { spaceId, open_access?, allow_space_requests? } → met à jour les champs
+export async function PATCH(req: Request) {
+  if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
+
+  const { spaceId, ...rest } = await req.json();
+  if (!spaceId) return NextResponse.json({ error: "spaceId requis" }, { status: 400 });
+
+  const allowed = ["open_access", "allow_space_requests", "maintenance_mode", "maintenance_message"];
+  const updates = Object.fromEntries(Object.entries(rest).filter(([k]) => allowed.includes(k)));
+
+  const { error } = await supabaseAdmin.from("spaces").update(updates).eq("id", spaceId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
+}
+
 // DELETE /api/spaces { spaceId } → supprime un espace
 export async function DELETE(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });

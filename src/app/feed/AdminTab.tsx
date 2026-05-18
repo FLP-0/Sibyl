@@ -18,7 +18,8 @@ type Member = {
 type GlobalStats = { members: number; posts: number; messages: number; reactions: number };
 
 
-type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures";
+type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures" | "demandes";
+type AccessRequest = { id: string; user_id: string; pseudo: string; created_at: string };
 type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string };
 type Candidature = { user_id: string; pseudo: string; messages: ModMessage[] };
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
@@ -84,6 +85,9 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const [selectedCandidature, setSelectedCandidature] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState("");
   const [replying, setReplying] = useState(false);
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [impersonateLoading, setImpersonateLoading] = useState<string | null>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -143,6 +147,13 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setMembers(enriched);
     setInactiveMembers(enriched.filter((m) => m.posts === 0 && m.messages === 0));
     setStats({ members: membersData.length, posts: postsCount ?? 0, messages: messagesCount ?? 0, reactions: reactionsCount ?? 0 });
+
+    const { count: reqCount } = await supabase
+      .from("access_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("space_id", spaceId)
+      .eq("status", "pending");
+    setPendingCount(reqCount ?? 0);
 
     const { data: bansData } = await supabase.from("bans").select("id, user_id, banned_until").eq("space_id", spaceId);
     const bansMap = new Map<string, BanInfo>();
@@ -219,7 +230,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   };
 
   const fetchInvitations = async () => {
-    const res = await fetch("/api/invitations");
+    const res = await fetch(`/api/invitations?space_id=${spaceId}`);
     if (!res.ok) return;
     const { invitations: data } = await res.json();
     setInvitations(data ?? []);
@@ -231,7 +242,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
       const res = await fetch("/api/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId, spaceId }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erreur inconnue");
@@ -251,6 +262,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     if (section === "analytics") fetchAnalytics();
     if (section === "invitations") fetchInvitations();
     if (section === "candidatures") fetchCandidatures();
+    if (section === "demandes") fetchAccessRequests();
     if (section !== "contenu" && realtimeRef.current) {
       supabase.removeChannel(realtimeRef.current);
       realtimeRef.current = null;
@@ -263,7 +275,12 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
 
   const handleRoleChange = async (memberId: string, newRole: string) => {
     setActionLoading(true);
-    await supabase.from("space_members").update({ role: newRole }).eq("user_id", memberId).eq("space_id", spaceId);
+    const { error } = await supabase.rpc("set_member_role", {
+      p_space_id: spaceId,
+      p_user_id:  memberId,
+      p_role:     newRole,
+    });
+    if (error) console.error("handleRoleChange error:", error.message, error.code);
     setConfirm(null);
     await fetchAll();
     setActionLoading(false);
@@ -271,7 +288,11 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
 
   const handleRemove = async (memberId: string) => {
     setActionLoading(true);
-    await supabase.from("space_members").delete().eq("user_id", memberId).eq("space_id", spaceId);
+    const { error } = await supabase.rpc("remove_space_member", {
+      p_space_id: spaceId,
+      p_user_id:  memberId,
+    });
+    if (error) console.error("handleRemove error:", error.message);
     setConfirm(null);
     if (selected?.user_id === memberId) setSelected(null);
     await fetchAll();
@@ -372,6 +393,71 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setCandidatures(Object.values(grouped));
   };
 
+  const fetchAccessRequests = async () => {
+    const { data: reqData } = await supabase
+      .from("access_requests")
+      .select("id, user_id, created_at")
+      .eq("space_id", spaceId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: true });
+    if (!reqData || reqData.length === 0) { setAccessRequests([]); return; }
+    const userIds = reqData.map((r) => r.user_id);
+    const { data: profiles } = await supabase.from("profiles").select("id, pseudo").in("id", userIds);
+    const pseudoMap: Record<string, string> = {};
+    (profiles ?? []).forEach((p) => { pseudoMap[p.id] = p.pseudo; });
+    setAccessRequests(reqData.map((r) => ({
+      id: r.id, user_id: r.user_id, pseudo: pseudoMap[r.user_id] ?? "—", created_at: r.created_at,
+    })));
+  };
+
+  const handleImpersonate = async (memberId: string, memberPseudo: string) => {
+    if (impersonateLoading) return;
+    setImpersonateLoading(memberId);
+    const { data: sess } = await supabase.auth.getSession();
+    if (!sess.session) { setImpersonateLoading(null); return; }
+
+    const res = await fetch("/api/superadmin/impersonate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authorization: `Bearer ${sess.session.access_token}` },
+      body: JSON.stringify({ userId: memberId }),
+    });
+    if (!res.ok) { setImpersonateLoading(null); return; }
+    const { hashed_token } = await res.json();
+
+    // Échange le token contre une session
+    const { data: otpData, error } = await supabase.auth.verifyOtp({
+      token_hash: hashed_token,
+      type: "magiclink",
+    });
+    if (error || !otpData.session) { setImpersonateLoading(null); return; }
+
+    // Sauvegarde la session du fondateur
+    localStorage.setItem("sibyl_owner_session", JSON.stringify({
+      access_token: sess.session.access_token,
+      refresh_token: sess.session.refresh_token,
+    }));
+    localStorage.setItem("sibyl_impersonating", JSON.stringify({ pseudo: memberPseudo }));
+
+    // La session est déjà définie par verifyOtp — rediriger
+    window.location.href = "/feed";
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    setActionLoading(true);
+    await supabase.rpc("approve_access_request", { p_request_id: requestId });
+    setPendingCount((c) => Math.max(0, c - 1));
+    await fetchAccessRequests();
+    setActionLoading(false);
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    setActionLoading(true);
+    await supabase.rpc("reject_access_request", { p_request_id: requestId });
+    setPendingCount((c) => Math.max(0, c - 1));
+    await fetchAccessRequests();
+    setActionLoading(false);
+  };
+
   const handleReply = async (applicantId: string) => {
     if (!replyInput.trim() || replying) return;
     setReplying(true);
@@ -408,12 +494,13 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     </div>
   );
 
-  const sectionTabs: { key: Section; label: string }[] = [
+  const sectionTabs: { key: Section; label: string; badge?: number }[] = [
     { key: "membres", label: "Membres" },
     { key: "analytics", label: "Analytics" },
     { key: "contenu", label: "Contenu" },
     { key: "invitations", label: "Invitations" },
     { key: "candidatures", label: "Candidatures" },
+    { key: "demandes", label: "Demandes", badge: pendingCount > 0 ? pendingCount : undefined },
     { key: "espace", label: "Espace" },
   ];
 
@@ -444,15 +531,25 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
 
       {/* Sous-onglets */}
       <div style={{ display: "flex", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-        {sectionTabs.map(({ key, label }) => (
+        {sectionTabs.map(({ key, label, badge }) => (
           <button key={key} onClick={() => setSection(key)} style={{
             flex: 1, padding: "10px 0", background: "transparent", border: "none",
             borderBottom: `2px solid ${section === key ? "#c9884c" : "transparent"}`,
             color: section === key ? "#c9884c" : "var(--muted)",
             fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
-            cursor: "pointer", transition: "all 0.15s",
+            cursor: "pointer", transition: "all 0.15s", position: "relative",
           }}>
             {label}
+            {badge !== undefined && (
+              <span style={{
+                position: "absolute", top: 4, right: 4,
+                minWidth: 14, height: 14, borderRadius: 7,
+                background: "#c9884c", color: "#fff",
+                fontSize: 8, fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "0 3px",
+              }}>{badge > 9 ? "9+" : badge}</span>
+            )}
           </button>
         ))}
       </div>
@@ -577,6 +674,29 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                               onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
                               onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.8")}
                             >Retirer de l'espace</button>
+                          </div>
+                        )}
+                        {!isSelf && isOwner && (
+                          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
+                            <button
+                              onClick={() => handleImpersonate(m.user_id, m.pseudo)}
+                              disabled={!!impersonateLoading}
+                              style={{
+                                padding: "7px 14px", background: "rgba(201,136,76,0.08)",
+                                border: "1px solid rgba(201,136,76,0.35)", borderRadius: 4,
+                                color: "#c9884c", fontSize: 9, letterSpacing: "0.1em",
+                                textTransform: "uppercase", cursor: impersonateLoading ? "wait" : "pointer",
+                                opacity: impersonateLoading && impersonateLoading !== m.user_id ? 0.4 : 0.9,
+                                transition: "all 0.15s",
+                              }}
+                              onMouseEnter={(e) => { if (!impersonateLoading) { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = "rgba(201,136,76,0.15)"; } }}
+                              onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.background = "rgba(201,136,76,0.08)"; }}
+                            >
+                              {impersonateLoading === m.user_id ? "Connexion…" : "♔ Incarner"}
+                            </button>
+                            <span style={{ fontSize: 10, color: "var(--muted)", fontStyle: "italic" }}>
+                              Voir l&apos;espace en tant que {m.pseudo}
+                            </span>
                           </div>
                         )}
                         {!isSelf && canBanMember(m) && (
@@ -890,6 +1010,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{c.pseudo}</span>
+                        <span style={{ fontSize: 9, color: "var(--muted)", background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 3, padding: "2px 7px", letterSpacing: "0.06em", flexShrink: 0 }}>{spaceName}</span>
                         {hasUnreplied && <span style={{ fontSize: 8, background: "rgba(201,136,76,0.15)", color: "#c9884c", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 6px", letterSpacing: "0.08em" }}>Nouveau</span>}
                       </div>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
@@ -954,6 +1075,58 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* ── DEMANDES D'ACCÈS ── */}
+        {section === "demandes" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: "#c9884c", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                Demandes d&apos;accès en attente
+              </span>
+              {pendingCount > 0 && (
+                <span style={{ fontSize: 9, background: "rgba(201,136,76,0.15)", color: "#c9884c", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 7px" }}>
+                  {pendingCount}
+                </span>
+              )}
+            </div>
+            {accessRequests.length === 0 && (
+              <p style={{ color: "var(--muted)", fontSize: 12, fontStyle: "italic", fontFamily: "Georgia, serif", textAlign: "center", marginTop: 40 }}>
+                Aucune demande en attente.
+              </p>
+            )}
+            {accessRequests.map((req) => (
+              <div key={req.id} style={{
+                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6,
+                padding: "14px 16px", display: "flex", alignItems: "center", gap: 12,
+              }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+                  background: "rgba(201,136,76,0.1)", border: "1px solid rgba(201,136,76,0.25)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 14, color: "#c9884c", fontWeight: 600,
+                }}>{req.pseudo[0]?.toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{req.pseudo}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{timeAgo(req.created_at)}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button onClick={() => handleApproveRequest(req.id)} disabled={actionLoading} style={{
+                    padding: "7px 14px", background: "rgba(76,175,110,0.1)",
+                    border: "1px solid rgba(76,175,110,0.4)", borderRadius: 4,
+                    color: "#4caf6e", fontSize: 9, letterSpacing: "0.1em",
+                    textTransform: "uppercase", cursor: actionLoading ? "not-allowed" : "pointer",
+                  }}>Approuver</button>
+                  <button onClick={() => handleRejectRequest(req.id)} disabled={actionLoading} style={{
+                    padding: "7px 14px", background: "rgba(201,76,76,0.08)",
+                    border: "1px solid rgba(201,76,76,0.3)", borderRadius: 4,
+                    color: "#c94c4c", fontSize: 9, letterSpacing: "0.1em",
+                    textTransform: "uppercase", cursor: actionLoading ? "not-allowed" : "pointer",
+                  }}>Refuser</button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

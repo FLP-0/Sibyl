@@ -19,6 +19,7 @@ type Props = {
   onClose: () => void;
   onViewProfile?: (userId: string) => void;
   spaceId: string;
+  currentUserId?: string;
 };
 
 const roleLabel: Record<string, { label: string; color: string }> = {
@@ -27,10 +28,18 @@ const roleLabel: Record<string, { label: string; color: string }> = {
   member:    { label: "Membre",     color: "var(--muted)" },
 };
 
-export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, spaceId }: Props) {
+const SENTENCE_HOURS = [1, 6, 24, 48, 72] as const;
+
+export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, spaceId, currentUserId }: Props) {
   const [info, setInfo] = useState<UserInfo | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [hasSentence, setHasSentence] = useState(false);
+  const [sentenceOpen, setSentenceOpen] = useState(false);
+  const [sentenceHours, setSentenceHours] = useState<number>(24);
+  const [sentencing, setSentencing] = useState(false);
+  const [sentenceDone, setSentenceDone] = useState(false);
+  const [sentenceError, setSentenceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!anchorEl || !popupRef.current) return;
@@ -62,12 +71,32 @@ export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, sp
   }, [onClose]);
 
   const fetchUser = async () => {
-    const [{ data: profile }, { data: member }, { count: postsCount }, { count: messagesCount }] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const queries: PromiseLike<any>[] = [
       supabase.from("profiles").select("pseudo, bio, created_at").eq("id", userId).single(),
       supabase.from("space_members").select("role").eq("user_id", userId).eq("space_id", spaceId).single(),
       supabase.from("posts").select("id", { count: "exact", head: true }).eq("author_id", userId).eq("space_id", spaceId),
       supabase.from("messages").select("id", { count: "exact", head: true }).eq("author_id", userId).eq("space_id", spaceId),
-    ]);
+    ];
+    if (currentUserId && currentUserId !== userId) {
+      queries.push(
+        supabase.from("user_badges").select("used_at").eq("user_id", currentUserId).eq("badge_id", "sentence").maybeSingle()
+      );
+    }
+
+    const results = await Promise.all(queries);
+    const [{ data: profile }, { data: member }, { count: postsCount }, { count: messagesCount }] =
+      results as [
+        { data: { pseudo: string; bio: string | null; created_at: string } | null },
+        { data: { role: string } | null },
+        { count: number | null },
+        { count: number | null },
+      ];
+
+    if (currentUserId && currentUserId !== userId && results[4]) {
+      const sentBadge = (results[4] as { data: { used_at: string | null } | null }).data;
+      setHasSentence(!!sentBadge && sentBadge.used_at === null);
+    }
 
     setInfo({
       pseudo: profile?.pseudo ?? "Membre",
@@ -77,6 +106,26 @@ export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, sp
       posts: postsCount ?? 0,
       messages: messagesCount ?? 0,
     });
+  };
+
+  const handleSentence = async () => {
+    if (sentencing || !currentUserId) return;
+    setSentencing(true);
+    setSentenceError(null);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) { setSentenceError("Session expirée"); setSentencing(false); return; }
+    const res = await fetch("/api/rewards/sentence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ targetUserId: userId, spaceId, hours: sentenceHours }),
+    });
+    const json = await res.json();
+    if (!res.ok) { setSentenceError(json.error ?? "Erreur"); setSentencing(false); return; }
+    setSentenceDone(true);
+    setHasSentence(false);
+    setSentencing(false);
+    setTimeout(() => onClose(), 2000);
   };
 
   const roleInfo = roleLabel[info?.role ?? "member"] ?? roleLabel.member;
@@ -157,7 +206,7 @@ export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, sp
 
           {/* Voir profil */}
           {onViewProfile && (
-            <div style={{ padding: "0 16px 14px" }}>
+            <div style={{ padding: "0 16px 0" }}>
               <button
                 onClick={() => { onViewProfile(userId); onClose(); }}
                 style={{
@@ -172,6 +221,98 @@ export default function UserPopup({ userId, anchorEl, onClose, onViewProfile, sp
               >
                 Voir le profil
               </button>
+            </div>
+          )}
+
+          {/* ── Badge Sentence ── */}
+          {hasSentence && info?.role === "member" && (
+            <div style={{
+              margin: "10px 16px 14px",
+              border: "1px solid rgba(212,175,55,0.35)",
+              borderRadius: 6, overflow: "hidden",
+            }}>
+              {!sentenceDone ? (
+                !sentenceOpen ? (
+                  <button
+                    onClick={() => setSentenceOpen(true)}
+                    style={{
+                      width: "100%", padding: "8px 0",
+                      background: "rgba(212,175,55,0.06)",
+                      border: "none", cursor: "pointer",
+                      color: "#d4af37", fontSize: 10,
+                      letterSpacing: "0.12em", textTransform: "uppercase",
+                      fontWeight: 600, transition: "background 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(212,175,55,0.12)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(212,175,55,0.06)")}
+                  >
+                    ⚖ Prononcer une sentence
+                  </button>
+                ) : (
+                  <div style={{ padding: "12px 14px", background: "rgba(212,175,55,0.04)" }}>
+                    <div style={{ fontSize: 9, color: "#d4af37", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10, fontWeight: 600 }}>
+                      ⚖ Durée de l&apos;exile
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+                      {SENTENCE_HOURS.map((h) => (
+                        <button
+                          key={h}
+                          onClick={() => setSentenceHours(h)}
+                          style={{
+                            padding: "4px 10px",
+                            background: sentenceHours === h ? "rgba(212,175,55,0.2)" : "transparent",
+                            border: `1px solid ${sentenceHours === h ? "rgba(212,175,55,0.6)" : "var(--border)"}`,
+                            borderRadius: 4, cursor: "pointer",
+                            color: sentenceHours === h ? "#d4af37" : "var(--muted)",
+                            fontSize: 10, fontWeight: sentenceHours === h ? 600 : 400,
+                            transition: "all 0.1s",
+                          }}
+                        >
+                          {h < 24 ? `${h}h` : `${h / 24}j`}
+                        </button>
+                      ))}
+                    </div>
+                    <p style={{ margin: "0 0 10px", fontSize: 9, color: "rgba(212,175,55,0.6)", lineHeight: 1.5 }}>
+                      Usage unique — le badge sera consommé.
+                    </p>
+                    {sentenceError && (
+                      <p style={{ margin: "0 0 8px", fontSize: 10, color: "#c94c4c" }}>{sentenceError}</p>
+                    )}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={handleSentence}
+                        disabled={sentencing}
+                        style={{
+                          flex: 1, padding: "7px 0",
+                          background: sentencing ? "transparent" : "rgba(212,175,55,0.15)",
+                          border: "1px solid rgba(212,175,55,0.5)",
+                          borderRadius: 4, cursor: sentencing ? "not-allowed" : "pointer",
+                          color: "#d4af37", fontSize: 10,
+                          letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600,
+                        }}
+                      >
+                        {sentencing ? "…" : "⚖ Confirmer"}
+                      </button>
+                      <button
+                        onClick={() => { setSentenceOpen(false); setSentenceError(null); }}
+                        style={{
+                          padding: "7px 12px", background: "transparent",
+                          border: "1px solid var(--border)", borderRadius: 4,
+                          color: "var(--muted)", fontSize: 10, cursor: "pointer",
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div style={{ padding: "10px 14px", textAlign: "center" }}>
+                  <span style={{ fontSize: 11, color: "#4caf6e", letterSpacing: "0.06em" }}>
+                    ✓ Sentence prononcée
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </>

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { awardXP, BADGE_NAMES, XP_LABELS } from "@/lib/rewards";
 import UserPopup from "./UserPopup";
 import ProfilePanel from "./ProfilePanel";
 
@@ -9,6 +11,7 @@ import ProfilePanel from "./ProfilePanel";
 type Reaction = { id: string; user_id: string };
 type Post = {
   id: string;
+  title: string | null;
   content: string;
   image_url: string | null;
   created_at: string;
@@ -17,6 +20,8 @@ type Post = {
   is_superadmin: boolean;
   profiles: { pseudo: string }[] | null;
   reactions: Reaction[];
+  role?: string;
+  prestigeBadge?: "resonance" | "magnetisme";
 };
 
 function timeAgo(dateStr: string): string {
@@ -27,16 +32,13 @@ function timeAgo(dateStr: string): string {
   return `il y a ${Math.floor(diff / 86400)} j`;
 }
 
-function renderWithMentions(text: string) {
-  return text.split(/(@\w+)/g).map((part, i) =>
-    /^@\w+$/.test(part)
-      ? <span key={i} style={{ color: "var(--accent)", fontWeight: 600 }}>{part}</span>
-      : part
-  );
-}
 
-export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; pseudo: string; spaceId: string }) {
+type OnXpGained = (amount: number, label: string, badges: string[], leveledUp: boolean) => void;
+
+export default function FeedTab({ userId, pseudo, spaceId, onXpGained }: { userId: string; pseudo: string; spaceId: string; onXpGained?: OnXpGained }) {
+  const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
+  const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [posting, setPosting] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -95,7 +97,7 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
   const fetchPosts = async () => {
     const { data: postsData } = await supabase
       .from("posts")
-      .select("id, content, image_url, created_at, author_id, pinned, reactions(id, user_id)")
+      .select("id, title, content, image_url, created_at, author_id, pinned, reactions(id, user_id)")
       .eq("space_id", spaceId)
       .order("pinned", { ascending: false })
       .order("created_at", { ascending: false });
@@ -103,18 +105,30 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
     if (!postsData || postsData.length === 0) { setPosts([]); return; }
 
     const authorIds = [...new Set(postsData.map((p) => p.author_id))];
-    const { data: profilesData } = await supabase
-      .from("profiles")
-      .select("id, pseudo, is_superadmin")
-      .in("id", authorIds);
+    const [{ data: profilesData }, { data: membersData }, { data: badgeData }] = await Promise.all([
+      supabase.from("profiles").select("id, pseudo, is_superadmin").in("id", authorIds),
+      supabase.from("space_members").select("user_id, role").eq("space_id", spaceId).in("user_id", authorIds),
+      supabase.from("user_badges").select("user_id, badge_id").in("user_id", authorIds).in("badge_id", ["magnetisme", "resonance"]),
+    ]);
 
     const profileMap: Record<string, { pseudo: string; is_superadmin: boolean }> = {};
     (profilesData ?? []).forEach((p) => { profileMap[p.id] = { pseudo: p.pseudo, is_superadmin: p.is_superadmin ?? false }; });
+
+    const roleMap: Record<string, string> = {};
+    (membersData ?? []).forEach((m) => { roleMap[m.user_id] = m.role; });
+
+    const prestigeMap: Record<string, "resonance" | "magnetisme"> = {};
+    (badgeData ?? []).forEach((b: { user_id: string; badge_id: string }) => {
+      if (b.badge_id === "magnetisme") prestigeMap[b.user_id] = "magnetisme";
+      else if (b.badge_id === "resonance" && prestigeMap[b.user_id] !== "magnetisme") prestigeMap[b.user_id] = "resonance";
+    });
 
     setPosts(postsData.map((p) => ({
       ...p,
       profiles: profileMap[p.author_id] ? [{ pseudo: profileMap[p.author_id].pseudo }] : null,
       is_superadmin: profileMap[p.author_id]?.is_superadmin ?? false,
+      role: roleMap[p.author_id],
+      prestigeBadge: prestigeMap[p.author_id],
     })) as Post[]);
   };
 
@@ -163,11 +177,12 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
   };
 
   const handlePost = async () => {
-    if (!content.trim() && !imageFile) return;
+    if (!title.trim()) return;
     if (userId === "dev-user") return;
-    const forbidden = findCensoredWord(content);
+    const forbidden = findCensoredWord(content) ?? findCensoredWord(title);
     if (forbidden) {
       setCensorError(`Le mot « ${forbidden} » est interdit dans cet espace.`);
+      setTitle("");
       setContent("");
       setImageFile(null);
       setImagePreview(null);
@@ -189,11 +204,18 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
     }
 
     await supabase.from("posts").insert({
+      title: title.trim(),
       content: content.trim(),
       image_url,
       author_id: userId,
       space_id: spaceId,
     });
+    awardXP("post_created", { spaceId, contentLength: content.trim().length }).then((result) => {
+      if (result && !result.skipped) {
+        onXpGained?.(result.amount, XP_LABELS["post_created"], result.newBadges.map((b) => BADGE_NAMES[b] ?? b), result.leveledUp);
+      }
+    });
+    setTitle("");
     setContent("");
     setImageFile(null);
     setImagePreview(null);
@@ -209,6 +231,9 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
       await supabase.from("reactions").delete().eq("post_id", post.id).eq("user_id", userId);
     } else {
       await supabase.from("reactions").insert({ post_id: post.id, user_id: userId });
+      if (post.author_id !== userId) {
+        awardXP("reaction_received", { spaceId, targetUserId: post.author_id, postId: post.id });
+      }
     }
     await fetchPosts();
   };
@@ -263,6 +288,19 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
           marginBottom: 32,
           boxShadow: "var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.05)",
         }}>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handlePost(); }}
+            placeholder="Titre *"
+            style={{
+              width: "100%", background: "transparent", border: "none",
+              borderBottom: "1px solid var(--border)", outline: "none",
+              color: "var(--foreground)", fontSize: 15, fontWeight: 600,
+              fontFamily: "Georgia, serif", padding: "0 0 10px",
+              marginBottom: 10, letterSpacing: "0.01em", boxSizing: "border-box",
+            }}
+          />
           <div style={{ position: "relative" }}>
             <textarea
               ref={textareaRef}
@@ -272,8 +310,8 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
                 if (e.key === "Escape") { setMentionFiltered([]); return; }
                 if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handlePost();
               }}
-              placeholder="Écrivez quelque chose… (@pseudo pour mentionner)"
-              rows={3}
+              placeholder="Contenu (optionnel) — @pseudo pour mentionner"
+              rows={2}
               style={{
                 width: "100%", background: "transparent", border: "none",
                 outline: "none", color: "var(--foreground)", fontSize: 13,
@@ -351,13 +389,13 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
             </div>
             <button
               onClick={handlePost}
-              disabled={posting || (!content.trim() && !imageFile)}
+              disabled={posting || !title.trim()}
               style={{
-                background: posting || (!content.trim() && !imageFile) ? "var(--border)" : "var(--accent)",
+                background: posting || !title.trim() ? "var(--border)" : "var(--accent)",
                 border: "none", borderRadius: 4,
-                color: posting || (!content.trim() && !imageFile) ? "var(--muted)" : "#fff",
+                color: posting || !title.trim() ? "var(--muted)" : "#fff",
                 fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase",
-                padding: "8px 20px", cursor: posting || (!content.trim() && !imageFile) ? "not-allowed" : "pointer",
+                padding: "8px 20px", cursor: posting || !title.trim() ? "not-allowed" : "pointer",
                 transition: "background 0.15s",
               }}
             >
@@ -383,107 +421,96 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
               const likeCount = post.reactions.length;
               const isSA = post.is_superadmin;
               return (
-                <article key={post.id} style={{
-                  background: isSA
-                    ? "linear-gradient(135deg, rgba(201,136,76,0.10) 0%, rgba(201,136,76,0.04) 100%)"
-                    : "var(--glass)",
-                  backdropFilter: "blur(20px) saturate(150%)",
-                  WebkitBackdropFilter: "blur(20px) saturate(150%)",
-                  border: isSA
-                    ? "1.5px solid rgba(201,136,76,0.65)"
-                    : post.pinned
-                      ? "1px solid rgba(201,136,76,0.45)"
-                      : "1px solid var(--glass-border)",
-                  borderRadius: 12,
-                  padding: "18px 22px",
-                  boxShadow: isSA
-                    ? "0 0 24px rgba(201,136,76,0.18), 0 0 0 1px rgba(201,136,76,0.08) inset, var(--shadow-sm)"
-                    : post.pinned
-                      ? "0 0 0 1px rgba(201,136,76,0.1) inset, var(--shadow-sm)"
+                <article
+                  key={post.id}
+                  onClick={() => router.push(`/post/${post.id}?space=${spaceId}`)}
+                  style={{
+                    background: isSA
+                      ? "linear-gradient(135deg, rgba(201,136,76,0.10) 0%, rgba(201,136,76,0.04) 100%)"
+                      : "var(--glass)",
+                    backdropFilter: "blur(20px) saturate(150%)",
+                    WebkitBackdropFilter: "blur(20px) saturate(150%)",
+                    border: isSA
+                      ? "1.5px solid rgba(201,136,76,0.65)"
+                      : post.pinned
+                        ? "1px solid rgba(201,136,76,0.45)"
+                        : "1px solid var(--glass-border)",
+                    borderRadius: 12,
+                    padding: "16px 20px",
+                    boxShadow: isSA
+                      ? "0 0 24px rgba(201,136,76,0.18), var(--shadow-sm)"
                       : "var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.04)",
-                  transition: "border-color 0.2s, box-shadow 0.2s",
-                }}>
-                  <div style={{
-                    display: "flex", justifyContent: "space-between",
-                    alignItems: "center", marginBottom: 10,
-                  }}>
+                    cursor: "pointer",
+                    transition: "border-color 0.15s, box-shadow 0.15s",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = isSA ? "rgba(201,136,76,0.9)" : "rgba(124,111,247,0.4)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = isSA ? "rgba(201,136,76,0.65)" : post.pinned ? "rgba(201,136,76,0.45)" : "var(--glass-border)"; }}
+                >
+                  {/* Ligne auteur + date */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {isSA && (
-                      <span style={{
-                        fontSize: 8, color: "#c9884c",
-                        background: "rgba(201,136,76,0.12)",
-                        border: "1px solid rgba(201,136,76,0.5)",
-                        borderRadius: 3, padding: "2px 7px",
-                        letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600,
-                      }}>
-                        ♔ Fondateur
+                      {isSA && (
+                        <span style={{ fontSize: 8, color: "#c9884c", background: "rgba(201,136,76,0.12)", border: "1px solid rgba(201,136,76,0.5)", borderRadius: 3, padding: "2px 7px", letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 600 }}>
+                          ♔ Fondateur
+                        </span>
+                      )}
+                      {!isSA && post.pinned && (
+                        <span style={{ fontSize: 8, color: "#c9884c", border: "1px solid rgba(201,136,76,0.5)", borderRadius: 3, padding: "2px 6px", letterSpacing: "0.1em", textTransform: "uppercase" }}>Épinglé</span>
+                      )}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); setPopup({ userId: post.author_id, anchor: e.currentTarget as HTMLElement }); }}
+                        style={{ fontSize: isSA ? 13 : 12, color: isSA ? "#c9884c" : "var(--accent)", fontWeight: 700, cursor: "pointer", letterSpacing: "0.04em" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.7")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+                      >
+                        {post.profiles?.[0]?.pseudo ?? (post.author_id === userId ? pseudo : "Membre")}
                       </span>
-                    )}
-                    {!isSA && post.pinned && (
-                      <span style={{ fontSize: 8, color: "#c9884c", border: "1px solid rgba(201,136,76,0.5)", borderRadius: 3, padding: "2px 6px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                        Épinglé
-                      </span>
-                    )}
-                    <span
-                      onClick={(e) => setPopup({ userId: post.author_id, anchor: e.currentTarget as HTMLElement })}
-                      style={{
-                        fontSize: isSA ? 15 : 13,
-                        color: isSA ? "#c9884c" : "var(--accent)",
-                        letterSpacing: "0.06em", fontWeight: 700, cursor: "pointer",
-                        textShadow: isSA ? "0 0 12px rgba(201,136,76,0.4)" : "none",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.7")}
-                      onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-                    >
-                      {post.profiles?.[0]?.pseudo ?? (post.author_id === userId ? pseudo : "Membre")}
-                    </span>
+                      {!isSA && post.role === "admin" && (
+                        <span style={{ fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, color: "#c9884c", background: "rgba(201,136,76,0.1)", border: "1px solid rgba(201,136,76,0.4)", borderRadius: 3, padding: "2px 6px" }}>admin</span>
+                      )}
+                      {!isSA && post.role === "moderator" && (
+                        <span style={{ fontSize: 8, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 700, color: "var(--accent)", background: "rgba(124,111,247,0.1)", border: "1px solid rgba(124,111,247,0.4)", borderRadius: 3, padding: "2px 6px" }}>modo</span>
+                      )}
+                      {post.prestigeBadge === "magnetisme" && (
+                        <span title="Magnétisme" style={{ fontSize: 11, color: "#d4af37", lineHeight: 1, filter: "drop-shadow(0 0 5px rgba(212,175,55,0.7))" }}>✦</span>
+                      )}
+                      {post.prestigeBadge === "resonance" && (
+                        <span title="Résonance" style={{ fontSize: 12, color: "#c9884c", lineHeight: 1, opacity: 0.85 }}>◈</span>
+                      )}
                     </div>
-                    <span style={{ fontSize: 12, color: "var(--muted)", letterSpacing: "0.03em" }}>
-                      {timeAgo(post.created_at)}
-                    </span>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{timeAgo(post.created_at)}</span>
                   </div>
-                  {post.content && (
-                    <p style={{
-                      color: isSA ? "rgba(234,230,248,0.95)" : "var(--foreground)",
-                      fontSize: isSA ? 17 : 15,
-                      lineHeight: 1.8,
-                      margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                      fontWeight: isSA ? 500 : 400,
-                    }}>
-                      {renderWithMentions(post.content)}
-                    </p>
-                  )}
-                  {post.image_url && (
-                    <a href={post.image_url} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: post.content ? 12 : 0 }}>
-                      <img
-                        src={post.image_url}
-                        alt=""
-                        style={{
-                          maxWidth: "100%", borderRadius: 4,
-                          border: "1px solid var(--border)", display: "block",
-                          cursor: "zoom-in",
-                        }}
-                      />
-                    </a>
-                  )}
-                  <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 6 }}>
+
+                  {/* Titre */}
+                  <h3 style={{
+                    margin: "0 0 12px",
+                    fontSize: isSA ? 17 : 15,
+                    fontWeight: 600, fontFamily: "Georgia, serif",
+                    color: isSA ? "rgba(234,230,248,0.95)" : "var(--foreground)",
+                    lineHeight: 1.4, letterSpacing: "0.01em",
+                  }}>
+                    {post.title || "Sans titre"}
+                  </h3>
+
+                  {/* Bas : réaction + hint lecture */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <button
-                      onClick={() => handleReaction(post)}
+                      onClick={(e) => { e.stopPropagation(); handleReaction(post); }}
                       style={{
                         background: "transparent", border: "none", cursor: "pointer",
-                        padding: "4px 8px 4px 0",
                         display: "flex", alignItems: "center", gap: 5,
                         color: hasLiked ? "var(--accent)" : "var(--muted)",
-                        fontSize: 13, transition: "color 0.15s",
+                        fontSize: 13, padding: 0, transition: "color 0.15s",
                       }}
                       onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
                       onMouseLeave={(e) => (e.currentTarget.style.color = hasLiked ? "var(--accent)" : "var(--muted)")}
                     >
-                      <span style={{ fontSize: 22, display: "inline-block", animation: hasLiked ? "heartBeat 0.4s ease" : "none" }}>{hasLiked ? "♥" : "♡"}</span>
-                      {likeCount > 0 && (
-                        <span style={{ fontSize: 13, letterSpacing: "0.04em" }}>{likeCount}</span>
-                      )}
+                      <span style={{ fontSize: 18 }}>{hasLiked ? "♥" : "♡"}</span>
+                      {likeCount > 0 && <span style={{ fontSize: 12 }}>{likeCount}</span>}
                     </button>
+                    <span style={{ fontSize: 10, color: "var(--muted)", marginLeft: "auto", letterSpacing: "0.06em" }}>
+                      Lire →
+                    </span>
                   </div>
                 </article>
               );
@@ -498,6 +525,7 @@ export default function FeedTab({ userId, pseudo, spaceId }: { userId: string; p
           onClose={() => setPopup(null)}
           onViewProfile={(uid) => { setPopup(null); setProfilePanel(uid); }}
           spaceId={spaceId}
+          currentUserId={userId}
         />
       )}
       {profilePanel && (
