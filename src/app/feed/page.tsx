@@ -171,7 +171,9 @@ function FeedPageInner() {
           <SidebarTab label="Chat" active={tab === "chat"} onClick={() => { setTab("chat"); setUnread((u) => ({ ...u, chat: false })); }} icon={<ChatIcon />} hasUnread={unread.chat} />
           <SidebarTab label="Feed" active={tab === "feed"} onClick={() => { setTab("feed"); setUnread((u) => ({ ...u, feed: false })); }} icon={<FeedIcon />} hasUnread={unread.feed} />
           <SidebarTab label="Profil" active={tab === "profile"} onClick={() => setTab("profile")} icon={<ProfileIcon />} />
-          <SidebarTab label="Modération" active={tab === "mod"} onClick={() => setTab("mod")} icon={<ModIcon />} accent="#c9884c" />
+          {role === "member" && (
+            <SidebarTab label="Modération" active={tab === "mod"} onClick={() => setTab("mod")} icon={<ModIcon />} accent="#c9884c" />
+          )}
           {(role === "moderator" || isAdmin) && (
             <SidebarTab label="Staff" active={tab === "staff"} onClick={() => setTab("staff")} icon={<StaffIcon />} accent="var(--accent)" />
           )}
