@@ -5,8 +5,12 @@ create table public.mod_applications (
   user_id     uuid        not null references auth.users(id) on delete cascade,
   content     text        not null,
   from_owner  boolean     not null default false,
+  sender_id   uuid        references auth.users(id) on delete set null,
   created_at  timestamptz not null default now()
 );
+
+-- Migration : ajouter sender_id sur une table existante
+-- alter table public.mod_applications add column if not exists sender_id uuid references auth.users(id) on delete set null;
 
 alter table public.mod_applications enable row level security;
 

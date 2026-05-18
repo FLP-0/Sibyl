@@ -19,7 +19,7 @@ type GlobalStats = { members: number; posts: number; messages: number; reactions
 
 
 type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures";
-type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string };
+type ModMessage = { id: string; content: string; from_owner: boolean; sender_id: string | null; sender_pseudo?: string; created_at: string };
 type Candidature = { user_id: string; pseudo: string; messages: ModMessage[] };
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
 type ContentItem = { id: string; type: "post" | "message" | "join"; content: string; pseudo: string; created_at: string; pinned?: boolean; reactions?: number; author_id?: string };
@@ -63,6 +63,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const [shareInvite, setShareInvite] = useState<Invitation | null>(null);
   const [creatingInvite, setCreatingInvite] = useState(false);
   const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const candChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const [inactiveMembers, setInactiveMembers] = useState<Member[]>([]);
   const [spaceName, setSpaceName] = useState("");
   const [spaceDesc, setSpaceDesc] = useState("");
@@ -250,7 +251,18 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     }
     if (section === "analytics") fetchAnalytics();
     if (section === "invitations") fetchInvitations();
-    if (section === "candidatures") fetchCandidatures();
+    if (section === "candidatures") {
+      fetchCandidatures();
+      if (!candChannelRef.current) {
+        candChannelRef.current = supabase
+          .channel("admin-cand-" + spaceId)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "mod_applications", filter: `space_id=eq.${spaceId}` }, () => fetchCandidatures())
+          .subscribe();
+      }
+    } else if (candChannelRef.current) {
+      supabase.removeChannel(candChannelRef.current);
+      candChannelRef.current = null;
+    }
     if (section !== "contenu" && realtimeRef.current) {
       supabase.removeChannel(realtimeRef.current);
       realtimeRef.current = null;
@@ -258,7 +270,10 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   }, [section, members]);
 
   useEffect(() => {
-    return () => { if (realtimeRef.current) supabase.removeChannel(realtimeRef.current); };
+    return () => {
+      if (realtimeRef.current) supabase.removeChannel(realtimeRef.current);
+      if (candChannelRef.current) supabase.removeChannel(candChannelRef.current);
+    };
   }, []);
 
   const handleRoleChange = async (memberId: string, newRole: string) => {
@@ -356,18 +371,27 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const fetchCandidatures = async () => {
     const { data: appsData } = await supabase
       .from("mod_applications")
-      .select("id, user_id, content, from_owner, created_at")
+      .select("id, user_id, content, from_owner, sender_id, created_at")
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
     if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
-    const userIds = [...new Set(appsData.map((a) => a.user_id))];
-    const { data: profiles } = await supabase.from("profiles").select("id, pseudo").in("id", userIds);
+
+    const memberIds = [...new Set(appsData.map((a) => a.user_id))];
+    const senderIds = [...new Set(appsData.map((a) => a.sender_id).filter(Boolean) as string[])];
+    const allIds = [...new Set([...memberIds, ...senderIds])];
+    const { data: profiles } = await supabase.from("profiles").select("id, pseudo").in("id", allIds);
     const pseudoMap: Record<string, string> = {};
     (profiles ?? []).forEach((p) => { pseudoMap[p.id] = p.pseudo; });
+
     const grouped: Record<string, Candidature> = {};
     appsData.forEach((a) => {
       if (!grouped[a.user_id]) grouped[a.user_id] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", messages: [] };
-      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
+      grouped[a.user_id].messages.push({
+        id: a.id, content: a.content, from_owner: a.from_owner,
+        sender_id: a.sender_id ?? null,
+        sender_pseudo: a.sender_id ? pseudoMap[a.sender_id] : undefined,
+        created_at: a.created_at,
+      });
     });
     setCandidatures(Object.values(grouped));
   };
@@ -376,7 +400,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     if (!replyInput.trim() || replying) return;
     setReplying(true);
     await supabase.from("mod_applications").insert({
-      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true,
+      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true, sender_id: userId,
     });
     setReplyInput("");
     await fetchCandidatures();
@@ -906,7 +930,9 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                         {c.messages.map((msg) => (
                           <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.from_owner ? "flex-end" : "flex-start", gap: 3 }}>
                             <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--muted)", letterSpacing: "0.06em" }}>
-                              {msg.from_owner ? "♔ Vous" : c.pseudo}
+                              {msg.from_owner
+                                ? (msg.sender_id === userId ? "Vous" : msg.sender_pseudo ? `♔ ${msg.sender_pseudo}` : "♔ Fondateur")
+                                : c.pseudo}
                             </span>
                             <div style={{
                               maxWidth: "80%",

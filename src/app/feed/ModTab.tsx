@@ -7,11 +7,13 @@ type ModMessage = {
   id: string;
   content: string;
   from_owner: boolean;
+  sender_id: string | null;
   created_at: string;
 };
 
 export default function ModTab({ userId, pseudo, spaceId }: { userId: string; pseudo: string; spaceId: string }) {
   const [messages, setMessages] = useState<ModMessage[]>([]);
+  const [senderPseudos, setSenderPseudos] = useState<Record<string, string>>({});
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -26,9 +28,13 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
       .on("postgres_changes", {
         event: "INSERT", schema: "public", table: "mod_applications",
         filter: `user_id=eq.${userId}`,
-      }, (payload) => {
+      }, async (payload) => {
         const row = payload.new as ModMessage & { space_id: string };
         if (row.space_id !== spaceId) return;
+        if (row.from_owner && row.sender_id) {
+          const { data } = await supabase.from("profiles").select("pseudo").eq("id", row.sender_id).single();
+          if (data) setSenderPseudos((prev) => ({ ...prev, [row.sender_id!]: data.pseudo }));
+        }
         setMessages((prev) => [...prev, row]);
       })
       .subscribe();
@@ -45,11 +51,22 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
   const loadMessages = async () => {
     const { data } = await supabase
       .from("mod_applications")
-      .select("id, content, from_owner, created_at")
+      .select("id, content, from_owner, sender_id, created_at")
       .eq("user_id", userId)
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
-    setMessages(data ?? []);
+    const msgs = (data ?? []) as ModMessage[];
+    setMessages(msgs);
+
+    const staffSenderIds = [...new Set(
+      msgs.filter((m) => m.from_owner && m.sender_id).map((m) => m.sender_id as string)
+    )];
+    if (staffSenderIds.length > 0) {
+      const { data: profiles } = await supabase.from("profiles").select("id, pseudo").in("id", staffSenderIds);
+      const map: Record<string, string> = {};
+      (profiles ?? []).forEach((p) => { map[p.id] = p.pseudo; });
+      setSenderPseudos(map);
+    }
   };
 
   const handleSend = async () => {
@@ -105,7 +122,9 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
             gap: 4,
           }}>
             <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--accent)", letterSpacing: "0.08em" }}>
-              {msg.from_owner ? "♔ Fondateur" : pseudo}
+              {msg.from_owner
+                ? (msg.sender_id && senderPseudos[msg.sender_id] ? senderPseudos[msg.sender_id] : "♔ Fondateur")
+                : pseudo}
             </span>
             <div style={{
               maxWidth: "76%",
