@@ -71,7 +71,12 @@ export default function SuperAdminPage() {
       if (!grouped[key]) grouped[key] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", space_id: a.space_id, space_name: spaceNameMap[a.space_id] ?? "—", messages: [] };
       grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
     });
-    setCandidatures(Object.values(grouped));
+    const sorted = Object.values(grouped).sort((a, b) => {
+      const aLatest = Math.max(...a.messages.map((m) => new Date(m.created_at).getTime()));
+      const bLatest = Math.max(...b.messages.map((m) => new Date(m.created_at).getTime()));
+      return bLatest - aLatest;
+    });
+    setCandidatures(sorted);
   };
 
   const handleReply = async (applicantId: string, spaceId: string) => {
