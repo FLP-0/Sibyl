@@ -68,6 +68,24 @@ function FeedPageInner() {
   useEffect(() => { tabRef.current = tab; }, [tab]);
   useEffect(() => { pseudoRef.current = pseudo; }, [pseudo]);
 
+  // Mise à jour du rôle en temps réel
+  useEffect(() => {
+    if (!userId || userId === "dev-user") return;
+    const channel = supabase
+      .channel("role-" + userId + "-" + spaceId)
+      .on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "space_members",
+        filter: `user_id=eq.${userId}`,
+      }, (payload) => {
+        const row = payload.new as { space_id: string; role: string };
+        if (row.space_id === spaceId) setRole(row.role);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId, spaceId]);
+
   useEffect(() => {
     userIdRef.current = userId;
     if (!userId || userId === "dev-user") return;
