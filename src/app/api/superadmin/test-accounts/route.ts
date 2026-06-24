@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL!;
 const DEFAULT_SPACE_ID = process.env.DEFAULT_SPACE_ID ?? "831eda8b-5972-4250-8ac4-bb536ee0d0f5";
 
 async function verifyOwner(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const auth = req.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return null;
   const { data } = await supabaseAdmin.auth.getUser(auth);
@@ -32,7 +28,7 @@ export async function POST(req: Request) {
   if (!await verifyOwner(req)) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
   }
-
+  const supabaseAdmin = getSupabaseAdmin();
   const { pseudo, role, spaceId } = await req.json();
   if (!pseudo?.trim()) return NextResponse.json({ error: "pseudo requis" }, { status: 400 });
   const validRoles = ["member", "moderator", "admin"];
