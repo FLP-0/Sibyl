@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL!;
 
 async function verifyOwner(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const auth = req.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return null;
   const { data } = await supabaseAdmin.auth.getUser(auth);
@@ -19,7 +15,7 @@ async function verifyOwner(req: Request) {
 // GET /api/spaces → liste tous les espaces avec stats
 export async function GET(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-
+  const supabaseAdmin = getSupabaseAdmin();
   const { data: spaces } = await supabaseAdmin.from("spaces").select("*").order("created_at", { ascending: false });
 
   if (!spaces) return NextResponse.json([]);
@@ -38,6 +34,7 @@ export async function GET(req: Request) {
 
 // POST /api/spaces { name, description } → crée un espace
 export async function POST(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const owner = await verifyOwner(req);
   if (!owner) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
 
@@ -75,7 +72,7 @@ export async function POST(req: Request) {
 // PATCH /api/spaces { spaceId, open_access?, allow_space_requests? } → met à jour les champs
 export async function PATCH(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-
+  const supabaseAdmin = getSupabaseAdmin();
   const { spaceId, ...rest } = await req.json();
   if (!spaceId) return NextResponse.json({ error: "spaceId requis" }, { status: 400 });
 
@@ -91,7 +88,7 @@ export async function PATCH(req: Request) {
 // DELETE /api/spaces { spaceId } → supprime un espace
 export async function DELETE(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-
+  const supabaseAdmin = getSupabaseAdmin();
   const { spaceId } = await req.json();
   if (!spaceId) return NextResponse.json({ error: "spaceId requis" }, { status: 400 });
 

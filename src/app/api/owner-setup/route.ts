@@ -1,10 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const SPACE_ID = process.env.SIBYL_SPACE_ID!;
 const OWNER_EMAIL = process.env.OWNER_EMAIL!;
@@ -23,6 +18,7 @@ export async function GET(req: Request) {
 
 // POST /api/owner-setup { userId } → passe le rôle à admin
 export async function POST(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const { userId } = await req.json();
   if (!userId) return NextResponse.json({ error: "userId manquant" }, { status: 400 });
 

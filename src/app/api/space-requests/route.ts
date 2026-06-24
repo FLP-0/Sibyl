@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL!;
 
 async function verifyOwner(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const auth = req.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return null;
   const { data } = await supabaseAdmin.auth.getUser(auth);
@@ -20,7 +16,7 @@ async function verifyOwner(req: Request) {
 // GET /api/space-requests?count=true → juste le nombre
 export async function GET(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-
+  const supabaseAdmin = getSupabaseAdmin();
   const url = new URL(req.url);
   if (url.searchParams.has("count")) {
     const { count } = await supabaseAdmin
@@ -62,6 +58,7 @@ export async function GET(req: Request) {
 
 // POST /api/space-requests { name, description, spaceId } → soumettre une demande
 export async function POST(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin();
   const auth = req.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
@@ -104,7 +101,7 @@ export async function POST(req: Request) {
 // PATCH /api/space-requests { id, action: 'approve'|'reject' } → traiter (owner uniquement)
 export async function PATCH(req: Request) {
   if (!await verifyOwner(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 403 });
-
+  const supabaseAdmin = getSupabaseAdmin();
   const { id, action } = await req.json();
   if (!id || !action) return NextResponse.json({ error: "id et action requis" }, { status: 400 });
 

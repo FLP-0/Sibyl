@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const LEVEL_THRESHOLDS = [0, 200, 700, 2000, 6000, 15000, 35000];
 const LEVEL_NAMES = ["Murmure", "Éveillé", "Initié", "Adepte", "Éclairé", "Voyant", "Oracle"];
@@ -17,6 +12,7 @@ const XP_LABELS: Record<string, string> = {
 };
 
 export async function GET(req: NextRequest) {
+  const supabaseAdmin = getSupabaseAdmin();
   const authHeader = req.headers.get("authorization") ?? "";
   if (!authHeader.startsWith("Bearer ")) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
