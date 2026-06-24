@@ -32,6 +32,19 @@ export default function LoginPage() {
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.user) return;
+      const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
+      if (session.user.email?.toLowerCase() === ownerEmail.toLowerCase()) {
+        router.push("/superadmin");
+      } else {
+        setSessionUserId(session.user.id);
+        setStep(2);
+      }
+    });
+  }, [router]);
+
   /* ── Étape 1 : authentification ── */
   const handleLogin = async () => {
     if (!email || !password || loading) return;
