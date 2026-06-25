@@ -124,7 +124,7 @@ export default function RegisterPage() {
       });
     }
 
-    router.push("/feed");
+    router.push(`/feed?space=${spaceId}`);
   };
 
   const passwordStrength = () => {
