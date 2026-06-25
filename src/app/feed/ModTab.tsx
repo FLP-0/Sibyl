@@ -8,6 +8,7 @@ type ModMessage = {
   content: string;
   from_owner: boolean;
   created_at: string;
+  kind?: string;
 };
 
 export default function ModTab({ userId, pseudo, spaceId }: { userId: string; pseudo: string; spaceId: string }) {
@@ -45,7 +46,7 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
   const loadMessages = async () => {
     const { data } = await supabase
       .from("mod_applications")
-      .select("id, content, from_owner, created_at")
+      .select("id, content, from_owner, created_at, kind")
       .eq("user_id", userId)
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
@@ -97,35 +98,58 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: msg.from_owner ? "flex-start" : "flex-end",
-            gap: 4,
-          }}>
-            <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--accent)", letterSpacing: "0.08em" }}>
-              {msg.from_owner ? "♔ Fondateur" : pseudo}
-            </span>
-            <div style={{
-              maxWidth: "76%",
-              background: msg.from_owner
-                ? "linear-gradient(135deg, rgba(201,136,76,0.13) 0%, rgba(201,136,76,0.06) 100%)"
-                : "rgba(124,111,247,0.1)",
-              border: `1px solid ${msg.from_owner ? "rgba(201,136,76,0.35)" : "rgba(124,111,247,0.22)"}`,
-              borderRadius: msg.from_owner ? "2px 12px 12px 12px" : "12px 2px 12px 12px",
-              padding: "10px 14px",
-              boxShadow: msg.from_owner ? "0 0 12px rgba(201,136,76,0.08)" : "none",
+        {messages.map((msg) => {
+          // Message de décision (refus / acceptation) — affiché centré et coloré
+          if (msg.kind === "rejected" || msg.kind === "accepted") {
+            const rejected = msg.kind === "rejected";
+            return (
+              <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, margin: "8px 0" }}>
+                <div style={{
+                  maxWidth: "90%", textAlign: "center",
+                  background: rejected ? "rgba(201,76,76,0.1)" : "rgba(76,175,110,0.1)",
+                  border: `1px solid ${rejected ? "rgba(201,76,76,0.4)" : "rgba(76,175,110,0.4)"}`,
+                  borderRadius: 8, padding: "10px 16px",
+                }}>
+                  <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600, lineHeight: 1.6, letterSpacing: "0.02em", color: rejected ? "#e05555" : "#4caf6e" }}>
+                    {msg.content}
+                  </p>
+                </div>
+                <span style={{ fontSize: 9, color: "var(--muted)" }}>
+                  {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          }
+          return (
+            <div key={msg.id} style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: msg.from_owner ? "flex-start" : "flex-end",
+              gap: 4,
             }}>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--foreground)", lineHeight: 1.65 }}>
-                {msg.content}
-              </p>
+              <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--accent)", letterSpacing: "0.08em" }}>
+                {msg.from_owner ? "♔ Fondateur" : pseudo}
+              </span>
+              <div style={{
+                maxWidth: "76%",
+                background: msg.from_owner
+                  ? "linear-gradient(135deg, rgba(201,136,76,0.13) 0%, rgba(201,136,76,0.06) 100%)"
+                  : "rgba(124,111,247,0.1)",
+                border: `1px solid ${msg.from_owner ? "rgba(201,136,76,0.35)" : "rgba(124,111,247,0.22)"}`,
+                borderRadius: msg.from_owner ? "2px 12px 12px 12px" : "12px 2px 12px 12px",
+                padding: "10px 14px",
+                boxShadow: msg.from_owner ? "0 0 12px rgba(201,136,76,0.08)" : "none",
+              }}>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--foreground)", lineHeight: 1.65 }}>
+                  {msg.content}
+                </p>
+              </div>
+              <span style={{ fontSize: 9, color: "var(--muted)" }}>
+                {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+              </span>
             </div>
-            <span style={{ fontSize: 9, color: "var(--muted)" }}>
-              {new Date(msg.created_at).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 

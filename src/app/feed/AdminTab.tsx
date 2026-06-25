@@ -20,7 +20,7 @@ type GlobalStats = { members: number; posts: number; messages: number; reactions
 
 type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures" | "demandes";
 type AccessRequest = { id: string; user_id: string; pseudo: string; created_at: string };
-type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string };
+type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string };
 type Candidature = { user_id: string; pseudo: string; messages: ModMessage[] };
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
 type ContentItem = { id: string; type: "post" | "message" | "join"; content: string; pseudo: string; created_at: string; pinned?: boolean; reactions?: number; author_id?: string };
@@ -83,6 +83,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const [banDuration, setBanDuration] = useState("3600");
   const [candidatures, setCandidatures] = useState<Candidature[]>([]);
   const [selectedCandidature, setSelectedCandidature] = useState<string | null>(null);
+  const [decisionLoading, setDecisionLoading] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState("");
   const [replying, setReplying] = useState(false);
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
@@ -377,7 +378,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const fetchCandidatures = async () => {
     const { data: appsData } = await supabase
       .from("mod_applications")
-      .select("id, user_id, content, from_owner, created_at")
+      .select("id, user_id, content, from_owner, created_at, kind")
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
     if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
@@ -388,9 +389,14 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     const grouped: Record<string, Candidature> = {};
     appsData.forEach((a) => {
       if (!grouped[a.user_id]) grouped[a.user_id] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", messages: [] };
-      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
+      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind });
     });
-    setCandidatures(Object.values(grouped));
+    // On masque les candidatures déjà tranchées (refusées / acceptées)
+    const pending = Object.values(grouped).filter((c) => {
+      const last = c.messages[c.messages.length - 1];
+      return !last || (last.kind !== "rejected" && last.kind !== "accepted");
+    });
+    setCandidatures(pending);
   };
 
   const fetchAccessRequests = async () => {
@@ -467,6 +473,33 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setReplyInput("");
     await fetchCandidatures();
     setReplying(false);
+  };
+
+  // Accepter une candidature : passe l'utilisateur modérateur + clôt la conversation
+  const handleAcceptCandidature = async (applicantId: string) => {
+    if (decisionLoading) return;
+    setDecisionLoading(applicantId);
+    await supabase.rpc("set_member_role", { p_space_id: spaceId, p_user_id: applicantId, p_role: "moderator" });
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "accepted",
+      content: "Votre candidature a été acceptée. Bienvenue dans l'équipe de modération.",
+    });
+    setSelectedCandidature(null);
+    await Promise.all([fetchCandidatures(), fetchAll()]);
+    setDecisionLoading(null);
+  };
+
+  // Refuser une candidature : message rouge côté utilisateur + retrait de la liste
+  const handleRejectCandidature = async (applicantId: string) => {
+    if (decisionLoading) return;
+    setDecisionLoading(applicantId);
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "rejected",
+      content: "Votre candidature n'a pas été approuvée.",
+    });
+    setSelectedCandidature(null);
+    await fetchCandidatures();
+    setDecisionLoading(null);
   };
 
   const filtered = members
@@ -1016,6 +1049,30 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
                         {lastMsg?.content}
                       </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleRejectCandidature(c.user_id)}
+                        disabled={decisionLoading === c.user_id}
+                        style={{
+                          padding: "6px 12px", background: "rgba(201,76,76,0.1)", border: "1px solid rgba(201,76,76,0.4)",
+                          borderRadius: 5, color: "#c94c4c", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: decisionLoading === c.user_id ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {decisionLoading === c.user_id ? "…" : "Refuser"}
+                      </button>
+                      <button
+                        onClick={() => handleAcceptCandidature(c.user_id)}
+                        disabled={decisionLoading === c.user_id}
+                        style={{
+                          padding: "6px 12px", background: "rgba(76,175,110,0.12)", border: "1px solid rgba(76,175,110,0.45)",
+                          borderRadius: 5, color: "#4caf6e", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: decisionLoading === c.user_id ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {decisionLoading === c.user_id ? "…" : "Accepter"}
+                      </button>
                     </div>
                     <span style={{ fontSize: 10, color: "var(--muted)", flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</span>
                   </div>

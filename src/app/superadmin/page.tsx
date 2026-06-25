@@ -14,7 +14,7 @@ type Space = {
   open_access: boolean; allow_space_requests: boolean;
   maintenance_mode: boolean; maintenance_message: string | null;
 };
-type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string };
+type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string };
 type CandidatureItem = { user_id: string; pseudo: string; space_id: string; space_name: string; messages: ModMsg[] };
 type SpaceOverlay = { spaceId: string; spaceName: string; view: "admin" | "staff" };
 
@@ -37,6 +37,7 @@ export default function SuperAdminPage() {
   const [search, setSearch] = useState("");
   const [candidatures, setCandidatures] = useState<CandidatureItem[]>([]);
   const [selectedCandidature, setSelectedCandidature] = useState<string | null>(null);
+  const [decisionLoading, setDecisionLoading] = useState<string | null>(null);
   const [replyInput, setReplyInput] = useState("");
   const [maintenanceDrafts, setMaintenanceDrafts] = useState<Record<string, string>>({});
   const [replying, setReplying] = useState(false);
@@ -86,7 +87,7 @@ export default function SuperAdminPage() {
   const fetchCandidatures = async () => {
     const { data: appsData } = await supabase
       .from("mod_applications")
-      .select("id, space_id, user_id, content, from_owner, created_at")
+      .select("id, space_id, user_id, content, from_owner, created_at, kind")
       .order("created_at", { ascending: true });
     if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
 
@@ -106,9 +107,14 @@ export default function SuperAdminPage() {
     appsData.forEach((a) => {
       const key = `${a.space_id}__${a.user_id}`;
       if (!grouped[key]) grouped[key] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", space_id: a.space_id, space_name: spaceNameMap[a.space_id] ?? "—", messages: [] };
-      grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at });
+      grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind });
     });
-    const sorted = Object.values(grouped).sort((a, b) => {
+    // On masque les candidatures déjà tranchées (refusées / acceptées)
+    const pending = Object.values(grouped).filter((c) => {
+      const last = c.messages[c.messages.length - 1];
+      return !last || (last.kind !== "rejected" && last.kind !== "accepted");
+    });
+    const sorted = pending.sort((a, b) => {
       const aLatest = Math.max(...a.messages.map((m) => new Date(m.created_at).getTime()));
       const bLatest = Math.max(...b.messages.map((m) => new Date(m.created_at).getTime()));
       return bLatest - aLatest;
@@ -125,6 +131,33 @@ export default function SuperAdminPage() {
     setReplyInput("");
     await fetchCandidatures();
     setReplying(false);
+  };
+
+  // Accepter une candidature : passe l'utilisateur modérateur + clôt la conversation
+  const handleAcceptCandidature = async (applicantId: string, spaceId: string) => {
+    if (decisionLoading) return;
+    setDecisionLoading(`${spaceId}__${applicantId}`);
+    await supabase.rpc("set_member_role", { p_space_id: spaceId, p_user_id: applicantId, p_role: "moderator" });
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "accepted",
+      content: "Votre candidature a été acceptée. Bienvenue dans l'équipe de modération.",
+    });
+    setSelectedCandidature(null);
+    await fetchCandidatures();
+    setDecisionLoading(null);
+  };
+
+  // Refuser une candidature : message rouge côté utilisateur + retrait de la liste
+  const handleRejectCandidature = async (applicantId: string, spaceId: string) => {
+    if (decisionLoading) return;
+    setDecisionLoading(`${spaceId}__${applicantId}`);
+    await supabase.from("mod_applications").insert({
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "rejected",
+      content: "Votre candidature n'a pas été approuvée.",
+    });
+    setSelectedCandidature(null);
+    await fetchCandidatures();
+    setDecisionLoading(null);
   };
 
   const fetchPendingRequestsCount = async () => {
@@ -812,6 +845,30 @@ export default function SuperAdminPage() {
                       <p style={{ margin: 0, fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {lastMsg?.content}
                       </p>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleRejectCandidature(c.user_id, c.space_id)}
+                        disabled={decisionLoading === key}
+                        style={{
+                          padding: "6px 12px", background: "rgba(201,76,76,0.1)", border: "1px solid rgba(201,76,76,0.4)",
+                          borderRadius: 5, color: "#c94c4c", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: decisionLoading === key ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {decisionLoading === key ? "…" : "Refuser"}
+                      </button>
+                      <button
+                        onClick={() => handleAcceptCandidature(c.user_id, c.space_id)}
+                        disabled={decisionLoading === key}
+                        style={{
+                          padding: "6px 12px", background: "rgba(76,175,110,0.12)", border: "1px solid rgba(76,175,110,0.45)",
+                          borderRadius: 5, color: "#4caf6e", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase",
+                          cursor: decisionLoading === key ? "not-allowed" : "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {decisionLoading === key ? "…" : "Accepter"}
+                      </button>
                     </div>
                     <span style={{ color: "var(--muted)", fontSize: 10, flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</span>
                   </div>
