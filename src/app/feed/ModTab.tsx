@@ -9,7 +9,16 @@ type ModMessage = {
   from_owner: boolean;
   created_at: string;
   kind?: string;
+  sender_role?: string | null;
 };
+
+// Libellé affiché côté candidat pour une réponse du staff.
+// Seul le fondateur porte la couronne ; un admin/modérateur d'espace est annoncé sans couronne.
+function staffLabel(senderRole?: string | null): string {
+  if (senderRole === "admin") return "Admin de l'espace";
+  if (senderRole === "moderator") return "Modérateur";
+  return "♔ Fondateur"; // 'founder' ou ancien message sans sender_role
+}
 
 export default function ModTab({ userId, pseudo, spaceId }: { userId: string; pseudo: string; spaceId: string }) {
   const [messages, setMessages] = useState<ModMessage[]>([]);
@@ -46,7 +55,7 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
   const loadMessages = async () => {
     const { data } = await supabase
       .from("mod_applications")
-      .select("id, content, from_owner, created_at, kind")
+      .select("id, content, from_owner, created_at, kind, sender_role")
       .eq("user_id", userId)
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
@@ -128,7 +137,7 @@ export default function ModTab({ userId, pseudo, spaceId }: { userId: string; ps
               gap: 4,
             }}>
               <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--accent)", letterSpacing: "0.08em" }}>
-                {msg.from_owner ? "♔ Fondateur" : pseudo}
+                {msg.from_owner ? staffLabel(msg.sender_role) : pseudo}
               </span>
               <div style={{
                 maxWidth: "76%",

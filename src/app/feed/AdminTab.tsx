@@ -20,7 +20,7 @@ type GlobalStats = { members: number; posts: number; messages: number; reactions
 
 type Section = "membres" | "contenu" | "espace" | "analytics" | "invitations" | "candidatures" | "demandes";
 type AccessRequest = { id: string; user_id: string; pseudo: string; created_at: string };
-type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string };
+type ModMessage = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string; sender_role?: string | null };
 type Candidature = { user_id: string; pseudo: string; messages: ModMessage[] };
 type Invitation = { id: string; code: string; status: string; expires_at: string; created_at: string; invited_by_pseudo: string; used_by_pseudo: string | null };
 type ContentItem = { id: string; type: "post" | "message" | "join"; content: string; pseudo: string; created_at: string; pinned?: boolean; reactions?: number; author_id?: string };
@@ -378,7 +378,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
   const fetchCandidatures = async () => {
     const { data: appsData } = await supabase
       .from("mod_applications")
-      .select("id, user_id, content, from_owner, created_at, kind")
+      .select("id, user_id, content, from_owner, created_at, kind, sender_role")
       .eq("space_id", spaceId)
       .order("created_at", { ascending: true });
     if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
@@ -389,7 +389,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     const grouped: Record<string, Candidature> = {};
     appsData.forEach((a) => {
       if (!grouped[a.user_id]) grouped[a.user_id] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", messages: [] };
-      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind });
+      grouped[a.user_id].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind, sender_role: a.sender_role });
     });
     // On masque les candidatures déjà tranchées (refusées / acceptées)
     const pending = Object.values(grouped).filter((c) => {
@@ -469,6 +469,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setReplying(true);
     await supabase.from("mod_applications").insert({
       space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true,
+      sender_role: isOwner ? "founder" : currentUserRole,
     });
     setReplyInput("");
     await fetchCandidatures();
@@ -482,6 +483,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     await supabase.rpc("set_member_role", { p_space_id: spaceId, p_user_id: applicantId, p_role: "moderator" });
     await supabase.from("mod_applications").insert({
       space_id: spaceId, user_id: applicantId, from_owner: true, kind: "accepted",
+      sender_role: isOwner ? "founder" : currentUserRole,
       content: "Votre candidature a été acceptée. Bienvenue dans l'équipe de modération.",
     });
     setSelectedCandidature(null);
@@ -495,6 +497,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
     setDecisionLoading(applicantId);
     await supabase.from("mod_applications").insert({
       space_id: spaceId, user_id: applicantId, from_owner: true, kind: "rejected",
+      sender_role: isOwner ? "founder" : currentUserRole,
       content: "Votre candidature n'a pas été approuvée.",
     });
     setSelectedCandidature(null);
@@ -1084,7 +1087,7 @@ export default function AdminTab({ userId, spaceId, currentUserRole, isOwner }: 
                         {c.messages.map((msg) => (
                           <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.from_owner ? "flex-end" : "flex-start", gap: 3 }}>
                             <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--muted)", letterSpacing: "0.06em" }}>
-                              {msg.from_owner ? "♔ Vous" : c.pseudo}
+                              {msg.from_owner ? (msg.sender_role === "founder" ? "♔ Fondateur" : "Vous") : c.pseudo}
                             </span>
                             <div style={{
                               maxWidth: "80%",

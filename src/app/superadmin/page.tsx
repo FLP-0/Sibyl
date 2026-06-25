@@ -14,7 +14,7 @@ type Space = {
   open_access: boolean; allow_space_requests: boolean;
   maintenance_mode: boolean; maintenance_message: string | null;
 };
-type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string };
+type ModMsg = { id: string; content: string; from_owner: boolean; created_at: string; kind?: string; sender_role?: string | null };
 type CandidatureItem = { user_id: string; pseudo: string; space_id: string; space_name: string; messages: ModMsg[] };
 type SpaceOverlay = { spaceId: string; spaceName: string; view: "admin" | "staff" };
 
@@ -87,7 +87,7 @@ export default function SuperAdminPage() {
   const fetchCandidatures = async () => {
     const { data: appsData } = await supabase
       .from("mod_applications")
-      .select("id, space_id, user_id, content, from_owner, created_at, kind")
+      .select("id, space_id, user_id, content, from_owner, created_at, kind, sender_role")
       .order("created_at", { ascending: true });
     if (!appsData || appsData.length === 0) { setCandidatures([]); return; }
 
@@ -107,7 +107,7 @@ export default function SuperAdminPage() {
     appsData.forEach((a) => {
       const key = `${a.space_id}__${a.user_id}`;
       if (!grouped[key]) grouped[key] = { user_id: a.user_id, pseudo: pseudoMap[a.user_id] ?? "—", space_id: a.space_id, space_name: spaceNameMap[a.space_id] ?? "—", messages: [] };
-      grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind });
+      grouped[key].messages.push({ id: a.id, content: a.content, from_owner: a.from_owner, created_at: a.created_at, kind: a.kind, sender_role: a.sender_role });
     });
     // On masque les candidatures déjà tranchées (refusées / acceptées)
     const pending = Object.values(grouped).filter((c) => {
@@ -126,7 +126,7 @@ export default function SuperAdminPage() {
     if (!replyInput.trim() || replying) return;
     setReplying(true);
     await supabase.from("mod_applications").insert({
-      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true,
+      space_id: spaceId, user_id: applicantId, content: replyInput.trim(), from_owner: true, sender_role: "founder",
     });
     setReplyInput("");
     await fetchCandidatures();
@@ -139,7 +139,7 @@ export default function SuperAdminPage() {
     setDecisionLoading(`${spaceId}__${applicantId}`);
     await supabase.rpc("set_member_role", { p_space_id: spaceId, p_user_id: applicantId, p_role: "moderator" });
     await supabase.from("mod_applications").insert({
-      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "accepted",
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "accepted", sender_role: "founder",
       content: "Votre candidature a été acceptée. Bienvenue dans l'équipe de modération.",
     });
     setSelectedCandidature(null);
@@ -152,7 +152,7 @@ export default function SuperAdminPage() {
     if (decisionLoading) return;
     setDecisionLoading(`${spaceId}__${applicantId}`);
     await supabase.from("mod_applications").insert({
-      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "rejected",
+      space_id: spaceId, user_id: applicantId, from_owner: true, kind: "rejected", sender_role: "founder",
       content: "Votre candidature n'a pas été approuvée.",
     });
     setSelectedCandidature(null);
@@ -879,7 +879,9 @@ export default function SuperAdminPage() {
                         {c.messages.map((msg) => (
                           <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.from_owner ? "flex-end" : "flex-start", gap: 3 }}>
                             <span style={{ fontSize: 9, color: msg.from_owner ? "#c9884c" : "var(--muted)", letterSpacing: "0.06em" }}>
-                              {msg.from_owner ? "♔ Vous" : c.pseudo}
+                              {msg.from_owner
+                                ? (msg.sender_role === "admin" ? "Admin de l'espace" : msg.sender_role === "moderator" ? "Modérateur" : "♔ Vous")
+                                : c.pseudo}
                             </span>
                             <div style={{
                               maxWidth: "80%",
