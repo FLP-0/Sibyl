@@ -33,8 +33,23 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session?.user) return;
+    let cancelled = false;
+    (async () => {
+      // Impersonation restée active (l'admin a quitté sans cliquer sur « Quitter ») :
+      // on restaure automatiquement la session du fondateur et on le renvoie au panneau.
+      const ownerSess = localStorage.getItem("sibyl_owner_session");
+      if (ownerSess) {
+        localStorage.removeItem("sibyl_owner_session");
+        localStorage.removeItem("sibyl_impersonating");
+        try {
+          const { access_token, refresh_token } = JSON.parse(ownerSess);
+          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (!error) { router.push("/superadmin"); return; }
+        } catch { /* token invalide → on retombe sur le flux normal */ }
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled || !session?.user) return;
       const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL ?? "";
       if (session.user.email?.toLowerCase() === ownerEmail.toLowerCase()) {
         router.push("/superadmin");
@@ -42,8 +57,22 @@ export default function LoginPage() {
         setSessionUserId(session.user.id);
         setStep(2);
       }
-    });
+    })();
+    return () => { cancelled = true; };
   }, [router]);
+
+  // Échappatoire : permet de se déconnecter d'une session restée active pour
+  // se reconnecter avec un autre compte (évite de rester bloqué à l'étape 2).
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem("sibyl_owner_session");
+    localStorage.removeItem("sibyl_impersonating");
+    setSessionUserId(null);
+    setCode("");
+    setDeniedSpace(null);
+    setError(null);
+    setStep(1);
+  };
 
   /* ── Étape 1 : authentification ── */
   const handleLogin = async () => {
@@ -376,6 +405,17 @@ export default function LoginPage() {
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "2px 0 0", letterSpacing: "0.02em" }}>
                 Le sésame circule entre initiés.
               </p>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                style={{
+                  alignSelf: "flex-start", marginTop: 2, background: "transparent", border: "none",
+                  padding: 0, cursor: "pointer", color: "var(--muted)", fontSize: 10,
+                  letterSpacing: "0.08em", textDecoration: "underline", textUnderlineOffset: 3,
+                }}
+              >
+                Ce n&apos;est pas vous ? Se déconnecter
+              </button>
             </div>
           )}
 
