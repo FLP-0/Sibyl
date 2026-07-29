@@ -1,0 +1,481 @@
+/* ==========================================================================
+   Maison à louer en Corse — feuille de style unique
+   Aucune dépendance externe : le site se déploie tel quel.
+   ========================================================================== */
+
+:root {
+  --mer: #1c5c74;
+  --mer-fonce: #123f52;
+  --mer-clair: #e6f1f4;
+  --sable: #f6f1e7;
+  --sable-fonce: #e8dfcd;
+  --terre: #c1653f;
+  --texte: #23282c;
+  --texte-doux: #5c666e;
+  --blanc: #ffffff;
+  --bordure: #ddd5c6;
+
+  --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --largeur: 1120px;
+  --rayon: 6px;
+  --ombre: 0 1px 3px rgba(18, 63, 82, .08), 0 8px 24px rgba(18, 63, 82, .06);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--texte);
+  background: var(--blanc);
+  -webkit-font-smoothing: antialiased;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+
+a { color: var(--mer); }
+a:hover { color: var(--terre); }
+
+h1, h2, h3 {
+  font-family: var(--serif);
+  line-height: 1.2;
+  color: var(--mer-fonce);
+  font-weight: normal;
+  margin: 0 0 .6em;
+}
+
+h1 { font-size: clamp(2rem, 5vw, 3rem); }
+h2 { font-size: clamp(1.5rem, 3.5vw, 2.1rem); }
+h3 { font-size: 1.2rem; }
+
+p { margin: 0 0 1.1em; }
+
+.conteneur {
+  width: 100%;
+  max-width: var(--largeur);
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.visuellement-cache {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* --- Lien d'évitement ---------------------------------------------------- */
+
+.evitement {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--mer-fonce);
+  color: #fff;
+  padding: 10px 16px;
+  z-index: 100;
+}
+.evitement:focus { left: 0; color: #fff; }
+
+/* --- En-tête ------------------------------------------------------------ */
+
+.entete {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(255, 255, 255, .96);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--bordure);
+}
+
+.entete__interieur {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 68px;
+}
+
+.marque {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  color: var(--mer-fonce);
+  text-decoration: none;
+  line-height: 1.2;
+}
+.marque span {
+  display: block;
+  font-family: var(--sans);
+  font-size: .68rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--texte-doux);
+}
+
+.nav ul {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.nav a {
+  display: block;
+  padding: 8px 12px;
+  font-size: .95rem;
+  text-decoration: none;
+  color: var(--texte);
+  border-radius: var(--rayon);
+}
+.nav a:hover { background: var(--mer-clair); color: var(--mer-fonce); }
+.nav a[aria-current="page"] {
+  color: var(--mer-fonce);
+  box-shadow: inset 0 -2px 0 var(--terre);
+}
+
+.nav__bascule {
+  display: none;
+  background: none;
+  border: 1px solid var(--bordure);
+  border-radius: var(--rayon);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: .9rem;
+  color: var(--mer-fonce);
+  cursor: pointer;
+}
+
+@media (max-width: 800px) {
+  .nav__bascule { display: block; }
+  .nav {
+    position: absolute;
+    left: 0; right: 0;
+    top: 100%;
+    background: var(--blanc);
+    border-bottom: 1px solid var(--bordure);
+    box-shadow: var(--ombre);
+    display: none;
+  }
+  .nav[data-ouvert="true"] { display: block; }
+  .nav ul { flex-direction: column; padding: 12px 20px 20px; gap: 0; }
+  .nav a { padding: 12px 4px; border-bottom: 1px solid var(--sable-fonce); }
+}
+
+/* --- Héros -------------------------------------------------------------- */
+
+.heros {
+  position: relative;
+  min-height: 74vh;
+  display: flex;
+  align-items: flex-end;
+  color: #fff;
+  background: var(--mer-fonce);
+  overflow: hidden;
+}
+.heros img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.heros::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(18, 63, 82, .15) 0%, rgba(18, 63, 82, .78) 100%);
+}
+.heros__texte {
+  position: relative;
+  z-index: 1;
+  /* on garde les 20px latéraux de .conteneur : sans cela le texte colle au bord
+     de l'écran sur mobile */
+  padding: 48px 20px 56px;
+  max-width: calc(44rem + 40px);
+}
+.heros h1 { color: #fff; margin-bottom: .3em; }
+.heros p {
+  font-size: 1.12rem;
+  color: rgba(255, 255, 255, .92);
+  margin-bottom: 1.6em;
+}
+.surtitre {
+  display: block;
+  font-size: .72rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  margin-bottom: 1.4em;
+  color: rgba(255, 255, 255, .8);
+}
+
+/* --- Boutons ------------------------------------------------------------ */
+
+.bouton {
+  display: inline-block;
+  padding: 13px 26px;
+  border: 1px solid transparent;
+  border-radius: var(--rayon);
+  background: var(--terre);
+  color: #fff;
+  font: inherit;
+  font-size: .97rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform .12s ease, background-color .12s ease;
+}
+.bouton:hover { background: #a9522f; color: #fff; transform: translateY(-1px); }
+
+.bouton--clair {
+  background: transparent;
+  border-color: rgba(255, 255, 255, .55);
+  color: #fff;
+  margin-left: 10px;
+}
+.bouton--clair:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+
+@media (max-width: 520px) {
+  .bouton, .bouton--clair { display: block; margin: 0 0 10px; text-align: center; }
+}
+
+/* --- Sections ----------------------------------------------------------- */
+
+.section { padding: 72px 0; }
+.section--sable { background: var(--sable); }
+.section--mer { background: var(--mer-clair); }
+
+.section__entete {
+  max-width: 40rem;
+  margin-bottom: 40px;
+}
+.section__entete p { color: var(--texte-doux); margin-bottom: 0; }
+
+.grille {
+  display: grid;
+  gap: 28px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.duo {
+  display: grid;
+  gap: 40px;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+}
+@media (max-width: 800px) { .duo { grid-template-columns: 1fr; } }
+
+.carte {
+  background: var(--blanc);
+  border: 1px solid var(--bordure);
+  border-radius: var(--rayon);
+  padding: 26px;
+  box-shadow: var(--ombre);
+}
+.carte h3 { margin-bottom: .4em; }
+.carte p:last-child { margin-bottom: 0; }
+
+.cadre img { border-radius: var(--rayon); box-shadow: var(--ombre); }
+
+/* --- Listes d'équipements ---------------------------------------------- */
+
+.equipements {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.equipements li {
+  padding-left: 26px;
+  position: relative;
+}
+.equipements li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: .62em;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--terre);
+}
+
+/* --- Galerie ------------------------------------------------------------ */
+
+.galerie {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.galerie button {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  width: 100%;
+}
+.galerie img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--rayon);
+  transition: opacity .15s ease;
+}
+.galerie button:hover img { opacity: .88; }
+
+.visionneuse {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 63, 82, .94);
+  padding: 24px;
+}
+.visionneuse[data-ouvert="true"] { display: flex; }
+.visionneuse img {
+  max-width: 100%;
+  max-height: 84vh;
+  border-radius: var(--rayon);
+}
+.visionneuse__fermer {
+  position: absolute;
+  top: 16px; right: 20px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, .5);
+  border-radius: var(--rayon);
+  color: #fff;
+  font: inherit;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.visionneuse__legende {
+  position: absolute;
+  bottom: 20px;
+  left: 0; right: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, .85);
+  font-size: .9rem;
+}
+
+/* --- Tableau des tarifs ------------------------------------------------- */
+
+.tableau-enveloppe {
+  overflow-x: auto;
+  border: 1px solid var(--bordure);
+  border-radius: var(--rayon);
+  background: var(--blanc);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 460px;
+}
+caption {
+  text-align: left;
+  padding: 16px 18px;
+  color: var(--texte-doux);
+  font-size: .93rem;
+}
+th, td {
+  text-align: left;
+  padding: 14px 18px;
+  border-top: 1px solid var(--bordure);
+}
+thead th {
+  background: var(--sable);
+  font-size: .82rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--texte-doux);
+  font-weight: 600;
+}
+tbody tr:hover { background: var(--sable); }
+
+/* --- Formulaire --------------------------------------------------------- */
+
+.formulaire { display: grid; gap: 18px; }
+.champ { display: grid; gap: 6px; }
+.champ label { font-size: .9rem; font-weight: 600; color: var(--mer-fonce); }
+.champ input, .champ textarea, .champ select {
+  font: inherit;
+  padding: 11px 13px;
+  border: 1px solid var(--bordure);
+  border-radius: var(--rayon);
+  background: var(--blanc);
+  color: var(--texte);
+  width: 100%;
+}
+.champ input:focus, .champ textarea:focus, .champ select:focus {
+  outline: 2px solid var(--mer);
+  outline-offset: 1px;
+  border-color: var(--mer);
+}
+.champ textarea { min-height: 140px; resize: vertical; }
+.champ--duo { display: grid; gap: 18px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 560px) { .champ--duo { grid-template-columns: 1fr; } }
+.aide { font-size: .85rem; color: var(--texte-doux); }
+
+/* --- Coordonnées -------------------------------------------------------- */
+
+.coordonnees { list-style: none; margin: 0; padding: 0; }
+.coordonnees li { margin-bottom: 14px; }
+.coordonnees strong { display: block; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--texte-doux); }
+
+/* --- Pied de page ------------------------------------------------------- */
+
+.pied {
+  background: var(--mer-fonce);
+  color: rgba(255, 255, 255, .8);
+  padding: 56px 0 28px;
+  font-size: .94rem;
+}
+.pied h2 { color: #fff; font-size: 1.05rem; margin-bottom: .7em; }
+.pied a { color: #fff; text-decoration: none; }
+.pied a:hover { text-decoration: underline; color: #fff; }
+.pied ul { list-style: none; margin: 0; padding: 0; }
+.pied li { margin-bottom: 8px; }
+.pied__grille {
+  display: grid;
+  gap: 36px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  padding-bottom: 32px;
+}
+.pied__bas {
+  border-top: 1px solid rgba(255, 255, 255, .18);
+  padding-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  justify-content: space-between;
+  font-size: .87rem;
+}
+
+/* --- Bandeau d'avertissement (à retirer en production) ------------------ */
+
+.bandeau-brouillon {
+  background: #fff6e5;
+  border-bottom: 1px solid #f0dcb4;
+  color: #6b4c12;
+  font-size: .88rem;
+  padding: 10px 0;
+}
+.bandeau-brouillon p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+  html { scroll-behavior: auto; }
+}

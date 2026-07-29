@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-label="Image d'en-tete a remplacer">
+  <defs>
+    <linearGradient id="ciel" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#2f7f9b"/>
+      <stop offset="1" stop-color="#0d3040"/>
+    </linearGradient>
+    <linearGradient id="colline" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#13475c"/>
+      <stop offset="1" stop-color="#0b2735"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#ciel)"/>
+  <circle cx="1240" cy="210" r="76" fill="#ffffff" fill-opacity="0.10"/>
+  <path d="M0 560 L280 400 L520 545 L760 415 L1040 585 L1320 455 L1600 590 L1600 900 L0 900 Z" fill="url(#colline)" fill-opacity="0.85"/>
+  <path d="M0 700 L360 615 L700 720 L1060 640 L1600 745 L1600 900 L0 900 Z" fill="#082230" fill-opacity="0.7"/>
+  <!-- Image de remplacement : substituer la photo reelle (assets/img/heros.jpg)
+       et mettre a jour le src dans index.html. -->
+</svg>

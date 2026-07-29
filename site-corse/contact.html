@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact et réservation — Maison à louer en Corse</title>
+<meta name="description" content="Contactez directement le propriétaire pour connaître les disponibilités et réserver la maison de vacances en Balagne.">
+<link rel="canonical" href="https://www.location-maison-en-corse.fr/contact.html">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="fr_FR">
+<meta property="og:title" content="Contact et réservation — Maison à louer en Corse">
+<meta property="og:description" content="Contactez directement le propriétaire pour connaître les disponibilités et réserver la maison de vacances en Balagne.">
+<meta property="og:url" content="https://www.location-maison-en-corse.fr/contact.html">
+<meta property="og:image" content="https://www.location-maison-en-corse.fr/assets/img/heros.svg">
+<link rel="stylesheet" href="assets/css/style.css">
+<link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<a class="evitement" href="#contenu">Aller au contenu</a>
+
+<!-- BANDEAU BROUILLON : supprimer ce bloc <div> avant la mise en ligne
+     (présent sur chaque page, voir CONTENU-A-COMPLETER.md). -->
+<div class="bandeau-brouillon">
+  <div class="conteneur"><p><strong>Version de travail.</strong> Les photos et les textes descriptifs sont des repères à remplacer par le contenu réel du site&nbsp;: voir <code>CONTENU-A-COMPLETER.md</code>.</p></div>
+</div>
+
+<header class="entete">
+  <div class="conteneur entete__interieur">
+    <a class="marque" href="index.html">Maison à louer en Corse<span>Balagne · Haute-Corse</span></a>
+    <button class="nav__bascule" aria-expanded="false" aria-controls="navigation">Menu</button>
+    <nav class="nav" id="navigation" aria-label="Navigation principale">
+      <ul>
+        <li><a href="index.html">Accueil</a></li>
+        <li><a href="la-maison.html">La maison</a></li>
+        <li><a href="galerie.html">Galerie</a></li>
+        <li><a href="tarifs.html">Tarifs &amp; disponibilités</a></li>
+        <li><a href="la-region.html">La Balagne</a></li>
+        <li><a href="contact.html" aria-current="page">Contact</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="contenu">
+
+  <section class="section">
+    <div class="conteneur duo" style="align-items:start">
+      <div>
+        <span class="surtitre" style="color:var(--texte-doux)">Contact</span>
+        <h1>Nous écrire</h1>
+        <p>Indiquez vos dates et le nombre de personnes&nbsp;: nous vous répondons avec la disponibilité et le tarif exact du séjour.</p>
+
+        <form class="formulaire" data-formulaire-contact action="#" method="post"
+              data-destinataire="contact@location-maison-en-corse.fr">
+          <!-- À COMPLÉTER : brancher un service d'envoi (Formspree, Netlify Forms…)
+               en renseignant l'attribut action. Voir README.md. -->
+          <div class="champ--duo">
+            <div class="champ">
+              <label for="nom">Nom et prénom</label>
+              <input id="nom" name="nom" type="text" autocomplete="name" required>
+            </div>
+            <div class="champ">
+              <label for="email">Adresse e-mail</label>
+              <input id="email" name="email" type="email" autocomplete="email" required>
+            </div>
+          </div>
+          <div class="champ--duo">
+            <div class="champ">
+              <label for="telephone">Téléphone <span class="aide">(facultatif)</span></label>
+              <input id="telephone" name="telephone" type="tel" autocomplete="tel">
+            </div>
+            <div class="champ">
+              <label for="personnes">Nombre de personnes</label>
+              <input id="personnes" name="personnes" type="number" min="1" max="20" step="1">
+            </div>
+          </div>
+          <div class="champ--duo">
+            <div class="champ">
+              <label for="arrivee">Date d'arrivée souhaitée</label>
+              <input id="arrivee" name="arrivee" type="date">
+            </div>
+            <div class="champ">
+              <label for="depart">Date de départ souhaitée</label>
+              <input id="depart" name="depart" type="date">
+            </div>
+          </div>
+          <div class="champ">
+            <label for="message">Votre message</label>
+            <textarea id="message" name="message" required></textarea>
+          </div>
+          <p class="aide">Les informations transmises servent uniquement à répondre à votre demande de location&nbsp;; elles ne sont ni cédées ni revendues.</p>
+          <p><button class="bouton" type="submit">Envoyer la demande</button></p>
+        </form>
+      </div>
+
+      <div class="carte">
+        <h2>Coordonnées</h2>
+        <!-- À COMPLÉTER : coordonnées réelles du propriétaire. -->
+        <ul class="coordonnees">
+          <li><strong>E-mail</strong> <a href="mailto:contact@location-maison-en-corse.fr">contact@location-maison-en-corse.fr</a></li>
+          <li><strong>Téléphone</strong> à compléter</li>
+          <li><strong>Situation</strong> Balagne, entre Calvi et l'Île-Rousse, Haute-Corse</li>
+          <li><strong>Réponse</strong> Sous 24 à 48&nbsp;heures</li>
+        </ul>
+        <p class="aide">L'adresse exacte de la maison et les modalités d'arrivée sont communiquées à la réservation.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="visionneuse" data-ouvert="false" role="dialog" aria-modal="true" aria-label="Photo agrandie">
+  <button class="visionneuse__fermer" type="button">Fermer ✕</button>
+  <img alt="">
+  <p class="visionneuse__legende"></p>
+</div>
+
+<footer class="pied">
+  <div class="conteneur">
+    <div class="pied__grille">
+      <div>
+        <h2>Maison à louer en Corse</h2>
+        <p>Location de vacances en Balagne, entre Calvi et l'Île-Rousse, en direct avec le propriétaire.</p>
+      </div>
+      <div>
+        <h2>Le site</h2>
+        <ul>
+          <li><a href="la-maison.html">La maison</a></li>
+          <li><a href="galerie.html">Galerie</a></li>
+          <li><a href="tarifs.html">Tarifs &amp; disponibilités</a></li>
+          <li><a href="la-region.html">La Balagne</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Contact</h2>
+        <ul>
+          <li><a href="contact.html">Formulaire de contact</a></li>
+          <!-- À COMPLÉTER : adresse e-mail et téléphone réels -->
+          <li><a href="mailto:contact@location-maison-en-corse.fr">contact@location-maison-en-corse.fr</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="pied__bas">
+      <p>© <span data-annee>2026</span> Maison à louer en Corse. Tous droits réservés.</p>
+      <p><a href="mentions-legales.html">Mentions légales</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>

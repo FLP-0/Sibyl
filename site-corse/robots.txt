@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://www.location-maison-en-corse.fr/sitemap.xml
